@@ -11,7 +11,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { RoleBadge } from "@/components/ui/RoleBadge";
 import { ShiftBadge } from "@/components/ui/ShiftBadge";
 import { useToast } from "@/hooks/use-toast";
-import { Clock, Moon, CalendarOff, Pill, ArrowLeftRight, User } from "lucide-react";
+import { Clock, Moon, CalendarOff, Pill, ArrowLeftRight, User, Settings2, Sun, Sunset, BedDouble, Check } from "lucide-react";
 import type { Ruolo } from "@/lib/api";
 
 const ROLE_THEME: Record<Ruolo, { bg: string; border: string; accent: string; avatar: string; dot: string }> = {
@@ -22,16 +22,26 @@ const ROLE_THEME: Record<Ruolo, { bg: string; border: string; accent: string; av
   CAPOSALA:   { bg: "bg-yellow-950/40",  border: "border-yellow-800/50",  accent: "text-yellow-300",  avatar: "bg-yellow-900/60 text-yellow-300",  dot: "bg-yellow-400"  },
 };
 
+type Pref = "MATTINO" | "POMERIGGIO" | "NOTTE";
+
+const PREF_OPTIONS: { key: Pref; label: string; icon: typeof Sun; color: string }[] = [
+  { key: "MATTINO",   label: "Mattino",   icon: Sun,     color: "bg-amber-500/15 text-amber-300 border-amber-500/30"   },
+  { key: "POMERIGGIO",label: "Pomeriggio",icon: Sunset,  color: "bg-orange-500/15 text-orange-300 border-orange-500/30"},
+  { key: "NOTTE",     label: "Notte",     icon: BedDouble,color: "bg-indigo-500/15 text-indigo-300 border-indigo-500/30"},
+];
+
 export default function Dashboard() {
   const { user } = useAuth();
   const { toast } = useToast();
   const role = (user?.ruolo ?? "OSS") as Ruolo;
   const theme = ROLE_THEME[role] ?? ROLE_THEME.OSS;
+  const canManage = user?.is_admin || user?.ruolo === "CAPOSALA";
 
   const [stats, setStats] = useState<Dipendente[]>([]);
   const [meiTurni, setMeiTurni] = useState<Turno[]>([]);
   const [loading, setLoading] = useState(true);
 
+  /* Swap state */
   const [swapOpen, setSwapOpen] = useState(false);
   const [swapTurno, setSwapTurno] = useState<Turno | null>(null);
   const [dipendenti, setDipendenti] = useState<Dipendente[]>([]);
@@ -40,6 +50,11 @@ export default function Dashboard() {
   const [colleagueTurnoId, setColleagueTurnoId] = useState("");
   const [swapNota, setSwapNota] = useState("");
   const [swapLoading, setSwapLoading] = useState(false);
+
+  /* Preference modal state */
+  const [prefTarget, setPrefTarget] = useState<Dipendente | null>(null);
+  const [prefSelected, setPrefSelected] = useState<Pref[]>([]);
+  const [prefLoading, setPrefLoading] = useState(false);
 
   const today = new Date();
   const mese = today.getMonth() + 1;
@@ -114,6 +129,47 @@ export default function Dashboard() {
     }
   };
 
+  /* Open preference modal */
+  const openPref = (dip: Dipendente) => {
+    if (!canManage) return;
+    setPrefTarget(dip);
+    setPrefSelected((dip.preferenze_turno ?? ["MATTINO", "POMERIGGIO", "NOTTE"]) as Pref[]);
+  };
+
+  const togglePref = (key: Pref) => {
+    setPrefSelected((prev) =>
+      prev.includes(key) ? prev.filter((p) => p !== key) : [...prev, key]
+    );
+  };
+
+  const savePref = async () => {
+    if (!prefTarget) return;
+    if (prefSelected.length === 0) {
+      toast({ title: "Seleziona almeno un turno", variant: "destructive" });
+      return;
+    }
+    setPrefLoading(true);
+    try {
+      const res = await fetch(`/flask-api/api/dipendenti/${prefTarget.id}/preferenze`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ preferenze: prefSelected }),
+      });
+      if (res.ok) {
+        const updated: Dipendente = await res.json();
+        setStats((prev) => prev.map((d) => (d.id === updated.id ? updated : d)));
+        setDipendenti((prev) => prev.map((d) => (d.id === updated.id ? updated : d)));
+        toast({ title: `Preferenze di ${prefTarget.nome} aggiornate` });
+        setPrefTarget(null);
+      } else {
+        toast({ title: "Errore", variant: "destructive" });
+      }
+    } finally {
+      setPrefLoading(false);
+    }
+  };
+
   const myStats = stats.find((s) => s.id === user?.id) ?? user;
 
   const statCards = [
@@ -185,9 +241,7 @@ export default function Dashboard() {
                             </p>
                           </div>
                           <ShiftBadge type={turno.tipo} />
-                          {turno.ore > 0 && (
-                            <span className="text-xs text-muted-foreground">{turno.ore}h</span>
-                          )}
+                          {turno.ore > 0 && <span className="text-xs text-muted-foreground">{turno.ore}h</span>}
                         </div>
                         <Button
                           size="sm"
@@ -211,7 +265,14 @@ export default function Dashboard() {
           <div className="lg:col-span-2">
             <Card className="glass border-white/8 shadow-none">
               <CardHeader className="pb-3">
-                <CardTitle className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Staff — Ore</CardTitle>
+                <CardTitle className="text-sm font-semibold text-muted-foreground uppercase tracking-wide flex items-center justify-between">
+                  Staff — Ore
+                  {canManage && (
+                    <span className="text-[10px] font-normal text-muted-foreground/50 normal-case">
+                      Clicca per preferenze
+                    </span>
+                  )}
+                </CardTitle>
               </CardHeader>
               <CardContent className="p-0">
                 <Table>
@@ -224,10 +285,25 @@ export default function Dashboard() {
                   </TableHeader>
                   <TableBody>
                     {stats.slice().sort((a, b) => b.ore_totali - a.ore_totali).map((dip) => (
-                      <TableRow key={dip.id} className={`border-white/5 ${dip.id === user?.id ? theme.bg : "hover:bg-white/3"}`}>
-                        <TableCell className="pl-6 font-medium text-foreground flex items-center gap-2">
-                          {dip.id === user?.id && <User className="h-3.5 w-3.5 text-muted-foreground" />}
-                          {dip.nome}
+                      <TableRow
+                        key={dip.id}
+                        className={`border-white/5 transition-colors ${
+                          dip.id === user?.id ? theme.bg : "hover:bg-white/3"
+                        } ${canManage ? "cursor-pointer" : ""}`}
+                        onClick={() => canManage && openPref(dip)}
+                      >
+                        <TableCell className="pl-6 font-medium text-foreground">
+                          <div className="flex items-center gap-2">
+                            {dip.id === user?.id && <User className="h-3.5 w-3.5 text-muted-foreground" />}
+                            {dip.nome}
+                          </div>
+                          {canManage && (dip.preferenze_turno ?? []).length < 3 && (
+                            <div className="flex gap-1 mt-0.5">
+                              {(dip.preferenze_turno ?? []).map((p) => (
+                                <span key={p} className="text-[9px] px-1 rounded bg-white/8 text-muted-foreground/60 font-mono">{p.slice(0, 3)}</span>
+                              ))}
+                            </div>
+                          )}
                         </TableCell>
                         <TableCell><RoleBadge role={dip.ruolo} /></TableCell>
                         <TableCell className="text-right pr-6 font-mono text-sm text-gold font-bold">{dip.ore_totali}</TableCell>
@@ -241,7 +317,7 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* Swap Dialog */}
+      {/* ── Swap Dialog ── */}
       <Dialog open={swapOpen} onOpenChange={setSwapOpen}>
         <DialogContent className="max-w-md glass-strong border-white/10">
           <DialogHeader>
@@ -250,7 +326,6 @@ export default function Dashboard() {
               Richiedi Scambio Turno
             </DialogTitle>
           </DialogHeader>
-
           <div className="space-y-5">
             <div className="rounded-xl bg-white/5 border border-white/10 p-4">
               <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Turno da cedere</p>
@@ -263,13 +338,10 @@ export default function Dashboard() {
                 </div>
               )}
             </div>
-
             <div className="space-y-2">
               <Label className="text-muted-foreground">Collega con cui scambiare</Label>
               <Select value={colleagueId} onValueChange={(v) => { setColleagueId(v); setColleagueTurnoId(""); }}>
-                <SelectTrigger className="border-white/10 bg-white/5" data-testid="select-colleague">
-                  <SelectValue placeholder="Seleziona un collega..." />
-                </SelectTrigger>
+                <SelectTrigger className="border-white/10 bg-white/5"><SelectValue placeholder="Seleziona un collega..." /></SelectTrigger>
                 <SelectContent>
                   {dipendenti.filter((d) => d.id !== user?.id).map((d) => (
                     <SelectItem key={d.id} value={d.id.toString()}>{d.nome} — {d.ruolo}</SelectItem>
@@ -277,26 +349,21 @@ export default function Dashboard() {
                 </SelectContent>
               </Select>
             </div>
-
             {colleagueId && (
               <div className="space-y-2">
                 <Label className="text-muted-foreground">Turno del collega <span className="text-muted-foreground/60 font-normal">(opzionale)</span></Label>
                 <Select value={colleagueTurnoId} onValueChange={setColleagueTurnoId}>
-                  <SelectTrigger className="border-white/10 bg-white/5" data-testid="select-colleague-shift">
-                    <SelectValue placeholder="Nessuna preferenza" />
-                  </SelectTrigger>
+                  <SelectTrigger className="border-white/10 bg-white/5"><SelectValue placeholder="Nessuna preferenza" /></SelectTrigger>
                   <SelectContent>
                     {colleagueTurni.length === 0
                       ? <SelectItem value="__none" disabled>Nessun turno disponibile</SelectItem>
                       : colleagueTurni.map((t) => (
                         <SelectItem key={t.id} value={t.id.toString()}>{t.data} — {t.tipo}</SelectItem>
-                      ))
-                    }
+                      ))}
                   </SelectContent>
                 </Select>
               </div>
             )}
-
             <div className="space-y-2">
               <Label className="text-muted-foreground">Motivazione <span className="text-muted-foreground/60 font-normal">(opzionale)</span></Label>
               <Textarea
@@ -305,10 +372,8 @@ export default function Dashboard() {
                 onChange={(e) => setSwapNota(e.target.value)}
                 rows={3}
                 className="border-white/10 bg-white/5 resize-none"
-                data-testid="swap-note"
               />
             </div>
-
             <div className="flex gap-3 pt-1">
               <Button variant="outline" className="flex-1 border-white/10 hover:bg-white/5" onClick={() => setSwapOpen(false)}>
                 Annulla
@@ -316,12 +381,64 @@ export default function Dashboard() {
               <button
                 onClick={submitSwap}
                 disabled={swapLoading || !colleagueId}
-                data-testid="submit-swap"
                 className="flex-1 rounded-lg font-bold text-sm gap-2 flex items-center justify-center transition-all disabled:opacity-50 glow-gold py-2"
                 style={{ background: "linear-gradient(135deg, #f59e0b, #d97706)", color: "#0f172a" }}
               >
                 <ArrowLeftRight className="h-4 w-4" />
                 {swapLoading ? "Invio..." : "Invia Richiesta"}
+              </button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Staff Preference Dialog (admin / Caposala only) ── */}
+      <Dialog open={!!prefTarget} onOpenChange={(open) => !open && setPrefTarget(null)}>
+        <DialogContent className="max-w-sm glass-strong border-white/10">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-foreground">
+              <Settings2 className="h-5 w-5 text-amber-400" />
+              Preferenze Turni — {prefTarget?.nome}
+            </DialogTitle>
+          </DialogHeader>
+
+          <div className="space-y-5">
+            <p className="text-xs text-muted-foreground">
+              Seleziona i tipi di turno che il sistema può assegnare a questo dipendente durante la generazione automatica.
+            </p>
+
+            <div className="space-y-2">
+              {PREF_OPTIONS.map(({ key, label, icon: Icon, color }) => {
+                const active = prefSelected.includes(key);
+                return (
+                  <button
+                    key={key}
+                    type="button"
+                    onClick={() => togglePref(key)}
+                    className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl border transition-all text-left ${
+                      active ? color : "bg-white/3 border-white/8 text-muted-foreground hover:bg-white/6"
+                    }`}
+                  >
+                    <Icon className="h-4 w-4 shrink-0" />
+                    <span className="font-semibold text-sm flex-1">{label}</span>
+                    {active && <Check className="h-4 w-4 shrink-0" />}
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="flex gap-3">
+              <Button variant="outline" className="flex-1 border-white/10 hover:bg-white/5" onClick={() => setPrefTarget(null)}>
+                Annulla
+              </Button>
+              <button
+                onClick={savePref}
+                disabled={prefLoading || prefSelected.length === 0}
+                className="flex-1 rounded-lg font-bold text-sm flex items-center justify-center gap-2 glow-gold py-2 disabled:opacity-50"
+                style={{ background: "linear-gradient(135deg, #f59e0b, #d97706)", color: "#0f172a" }}
+                data-testid="save-pref"
+              >
+                {prefLoading ? "Salvo..." : "Salva Preferenze"}
               </button>
             </div>
           </div>

@@ -9,6 +9,7 @@ export type Dipendente = {
   ferie: number;
   malattia: number;
   is_admin: boolean;
+  preferenze_turno: Array<'MATTINO' | 'POMERIGGIO' | 'NOTTE'>;
 };
 
 export type TipoTurno = 'MATTINO' | 'POMERIGGIO' | 'NOTTE' | 'FERIE' | 'MALATTIA' | 'RIPOSO';

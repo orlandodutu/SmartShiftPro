@@ -35,6 +35,7 @@ class Dipendente(db.Model):
     ferie = db.Column(db.Integer, default=0)
     malattia = db.Column(db.Integer, default=0)
     is_admin = db.Column(db.Boolean, default=False)
+    preferenze_turno = db.Column(db.String(100), default='MATTINO,POMERIGGIO,NOTTE')
 
     def to_dict(self):
         return {
@@ -45,7 +46,8 @@ class Dipendente(db.Model):
             'notti_fatte': self.notti_fatte,
             'ferie': self.ferie,
             'malattia': self.malattia,
-            'is_admin': self.is_admin
+            'is_admin': self.is_admin,
+            'preferenze_turno': (self.preferenze_turno or 'MATTINO,POMERIGGIO,NOTTE').split(',')
         }
 
 
@@ -308,7 +310,6 @@ def genera_turni():
     if not dipendenti:
         return jsonify({'errore': 'Nessun dipendente trovato'}), 400
 
-    tipi_turno = ['MATTINO', 'POMERIGGIO', 'NOTTE', 'RIPOSO']
     ore_map = {'MATTINO': 7, 'POMERIGGIO': 7, 'NOTTE': 10, 'RIPOSO': 0}
     generati = 0
     saltati = 0
@@ -322,8 +323,13 @@ def genera_turni():
             if dip.id in turni_esistenti:
                 saltati += 1
                 continue
-            offset = (idx + i) % len(tipi_turno)
-            tipo = 'RIPOSO' if giorno.weekday() == 6 and idx % 2 == 0 else tipi_turno[offset]
+            prefs = (dip.preferenze_turno or 'MATTINO,POMERIGGIO,NOTTE').split(',')
+            tipi_disponibili = [t for t in ['MATTINO', 'POMERIGGIO', 'NOTTE'] if t in prefs]
+            if not tipi_disponibili:
+                tipi_disponibili = ['MATTINO']
+            tipi_con_riposo = tipi_disponibili + ['RIPOSO']
+            offset = (idx + i) % len(tipi_con_riposo)
+            tipo = 'RIPOSO' if giorno.weekday() == 6 and idx % 2 == 0 else tipi_con_riposo[offset]
             ore = ore_map[tipo]
             turno = Turno(dipendente_id=dip.id, data=data_str, tipo=tipo, ore=ore, note='Auto-generato')
             db.session.add(turno)
@@ -431,6 +437,23 @@ def annulla_scambio(id):
     return jsonify({'success': True})
 
 
+@api.route('/api/dipendenti/<int:id>/preferenze', methods=['PUT'])
+def aggiorna_preferenze(id):
+    if 'user_id' not in session:
+        return jsonify({'errore': 'Non autenticato'}), 401
+    richiedente = db.session.get(Dipendente, session['user_id'])
+    if not richiedente or (not richiedente.is_admin and richiedente.ruolo != 'CAPOSALA'):
+        return jsonify({'errore': 'Non autorizzato'}), 403
+    dip = db.session.get(Dipendente, id)
+    if not dip:
+        return jsonify({'errore': 'Dipendente non trovato'}), 404
+    preferenze = request.json.get('preferenze', ['MATTINO', 'POMERIGGIO', 'NOTTE'])
+    valide = [p for p in preferenze if p in ('MATTINO', 'POMERIGGIO', 'NOTTE')]
+    dip.preferenze_turno = ','.join(valide) if valide else 'MATTINO,POMERIGGIO,NOTTE'
+    db.session.commit()
+    return jsonify(dip.to_dict())
+
+
 @api.route('/api/manifest.json', methods=['GET'])
 def manifest():
     return send_file(os.path.join(BASE_DIR, 'manifest.json'), mimetype='application/manifest+json')
@@ -443,12 +466,30 @@ def genera_pdf():
     nome_mesi = ['', 'Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno',
                  'Luglio', 'Agosto', 'Settembre', 'Ottobre', 'Novembre', 'Dicembre']
     prefix = f"{anno}-{mese.zfill(2)}"
-    turni = Turno.query.filter(Turno.data.like(f"{prefix}%")).order_by(Turno.data).all()
+
+    # Permission check: admin and Caposala get the full report, others get only their own
+    user_id = session.get('user_id')
+    me = db.session.get(Dipendente, user_id) if user_id else None
+    is_privileged = me and (me.is_admin or me.ruolo == 'CAPOSALA')
+    if not me:
+        return jsonify({'errore': 'Non autenticato'}), 401
+
+    turni_query = Turno.query.filter(Turno.data.like(f"{prefix}%")).order_by(Turno.data)
+    if not is_privileged:
+        turni_query = turni_query.filter(Turno.dipendente_id == user_id)
+    turni = turni_query.all()
+
+    report_title = (
+        f"Report Turni - {nome_mesi[int(mese)]} {anno}"
+        if is_privileged
+        else f"Report Personale - {me.nome} - {nome_mesi[int(mese)]} {anno}"
+    )
+
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=A4, topMargin=30, bottomMargin=30)
     styles = getSampleStyleSheet()
     elements = [
-        Paragraph(f"Report Turni - {nome_mesi[int(mese)]} {anno}", styles['Title']),
+        Paragraph(report_title, styles['Title']),
         Spacer(1, 20)
     ]
     if turni:
@@ -457,7 +498,7 @@ def genera_pdf():
             data_table.append([t.data, t.dipendente.nome, t.dipendente.ruolo, t.tipo, str(t.ore), t.note or ''])
         table = Table(data_table, colWidths=[70, 100, 80, 80, 40, 100])
         table.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1a56db')),
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1a3a6b')),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
             ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
             ('FONTSIZE', (0, 0), (-1, -1), 9),
@@ -472,15 +513,18 @@ def genera_pdf():
         elements.append(Paragraph("Nessun turno registrato per questo mese.", styles['Normal']))
 
     elements.append(Spacer(1, 30))
-    elements.append(Paragraph("Riepilogo per Dipendente", styles['Heading2']))
+    elements.append(Paragraph("Riepilogo", styles['Heading2']))
     elements.append(Spacer(1, 10))
-    dipendenti = Dipendente.query.order_by(Dipendente.ruolo).all()
+    if is_privileged:
+        dip_list = Dipendente.query.order_by(Dipendente.ruolo).all()
+    else:
+        dip_list = [me]
     riepilogo = [['Dipendente', 'Ruolo', 'Ore', 'Notti', 'Ferie', 'Malattia']]
-    for d in dipendenti:
+    for d in dip_list:
         riepilogo.append([d.nome, d.ruolo, str(d.ore_totali), str(d.notti_fatte), str(d.ferie), str(d.malattia)])
     rt = Table(riepilogo, colWidths=[100, 80, 70, 60, 60, 70])
     rt.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1a56db')),
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1a3a6b')),
         ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
         ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
         ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
@@ -642,6 +686,19 @@ def legacy_genera_pdf():
 if __name__ == '__main__':
     with app.app_context():
         db.create_all()
+        # Migration: add preferenze_turno column to existing databases
+        from sqlalchemy import text, inspect as sa_inspect
+        try:
+            inspector = sa_inspect(db.engine)
+            cols = [c['name'] for c in inspector.get_columns('dipendente')]
+            if 'preferenze_turno' not in cols:
+                with db.engine.connect() as conn:
+                    conn.execute(text(
+                        "ALTER TABLE dipendente ADD COLUMN preferenze_turno VARCHAR(100) DEFAULT 'MATTINO,POMERIGGIO,NOTTE'"
+                    ))
+                    conn.commit()
+        except Exception:
+            pass
         inizializza_staff()
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port, debug=False)
