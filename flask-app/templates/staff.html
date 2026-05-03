@@ -1,0 +1,191 @@
+{% extends "base.html" %}
+{% block title %}Staff - Gestione Turni{% endblock %}
+{% block extra_styles %}
+<style>
+.staff-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    gap: 16px;
+}
+.staff-card {
+    background: white;
+    border-radius: 16px;
+    padding: 20px;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.06);
+    border-top: 3px solid #1a56db;
+    transition: transform 0.2s;
+}
+.staff-card:hover { transform: translateY(-2px); }
+.staff-card.ruolo-PULIZIE { border-top-color: #f59e0b; }
+.staff-card.ruolo-OSS { border-top-color: #10b981; }
+.staff-card.ruolo-INFERMIERA { border-top-color: #8b5cf6; }
+.staff-card.ruolo-DEV { border-top-color: #1a56db; }
+.staff-card .name { font-size: 1.05rem; font-weight: 700; margin-bottom: 6px; }
+.staff-card .stats { display: flex; gap: 10px; flex-wrap: wrap; margin: 14px 0; }
+.staff-card .stat { text-align: center; }
+.staff-card .stat .v { font-size: 1.2rem; font-weight: 700; color: #1a56db; }
+.staff-card .stat .l { font-size: 0.72rem; color: #94a3b8; }
+.staff-card .actions { display: flex; gap: 8px; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px">
+        <h1 style="font-size:1.4rem;font-weight:700">👥 Gestione Staff</h1>
+        <button class="btn btn-primary" onclick="openAddModal()">+ Aggiungi Dipendente</button>
+    </div>
+
+    <div class="staff-grid" id="staff-grid">
+        <p style="color:#94a3b8">Caricamento...</p>
+    </div>
+</div>
+
+<!-- Modal Aggiungi -->
+<div class="modal-overlay" id="add-modal">
+    <div class="modal">
+        <h3>Aggiungi Dipendente</h3>
+        <div class="form-group">
+            <label>Nome</label>
+            <input type="text" id="a-nome" placeholder="Nome..." />
+        </div>
+        <div class="form-group">
+            <label>Ruolo</label>
+            <select id="a-ruolo">
+                <option>OSS</option>
+                <option>INFERMIERA</option>
+                <option>PULIZIE</option>
+                <option>DEV</option>
+            </select>
+        </div>
+        <div class="form-group">
+            <label>Password</label>
+            <input type="text" id="a-password" value="password123" />
+        </div>
+        <div id="add-error" class="alert alert-error" style="display:none"></div>
+        <div class="modal-actions">
+            <button class="btn btn-secondary" onclick="closeAddModal()">Annulla</button>
+            <button class="btn btn-primary" onclick="aggiungiDipendente()">Aggiungi</button>
+        </div>
+    </div>
+</div>
+
+<!-- Modal Modifica -->
+<div class="modal-overlay" id="edit-modal">
+    <div class="modal">
+        <h3>Modifica Dipendente</h3>
+        <input type="hidden" id="e-id" />
+        <div class="form-group">
+            <label>Ruolo</label>
+            <select id="e-ruolo">
+                <option>OSS</option>
+                <option>INFERMIERA</option>
+                <option>PULIZIE</option>
+                <option>DEV</option>
+            </select>
+        </div>
+        <div class="form-group">
+            <label>Nuova Password</label>
+            <input type="text" id="e-password" placeholder="Lascia vuoto per non cambiare" />
+        </div>
+        <div class="form-group">
+            <label>Giorni Ferie</label>
+            <input type="number" id="e-ferie" min="0" />
+        </div>
+        <div class="form-group">
+            <label>Giorni Malattia</label>
+            <input type="number" id="e-malattia" min="0" />
+        </div>
+        <div class="modal-actions">
+            <button class="btn btn-secondary" onclick="closeEditModal()">Annulla</button>
+            <button class="btn btn-primary" onclick="salvaModifica()">Salva</button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function loadStaff() {
+    const r = await fetch('/api/dipendenti');
+    const dipendenti = await r.json();
+    const grid = document.getElementById('staff-grid');
+    grid.innerHTML = dipendenti.map(d => `
+        <div class="staff-card ruolo-${d.ruolo}">
+            <div class="name">${d.nome}</div>
+            <span class="badge badge-${d.ruolo}">${d.ruolo}</span>
+            <div class="stats">
+                <div class="stat"><div class="v">${d.ore_totali}</div><div class="l">Ore</div></div>
+                <div class="stat"><div class="v">${d.notti_fatte}</div><div class="l">Notti</div></div>
+                <div class="stat"><div class="v">${d.ferie}</div><div class="l">Ferie</div></div>
+                <div class="stat"><div class="v">${d.malattia}</div><div class="l">Malattia</div></div>
+            </div>
+            <div class="actions">
+                <button class="btn btn-secondary" style="font-size:0.8rem;padding:6px 12px" onclick='openEditModal(${JSON.stringify(d)})'>Modifica</button>
+                <button class="btn btn-danger" style="font-size:0.8rem;padding:6px 12px" onclick="eliminaDipendente(${d.id}, '${d.nome}')">Elimina</button>
+            </div>
+        </div>
+    `).join('');
+}
+
+function openAddModal() { document.getElementById('add-modal').classList.add('active'); }
+function closeAddModal() { document.getElementById('add-modal').classList.remove('active'); }
+
+function openEditModal(d) {
+    document.getElementById('e-id').value = d.id;
+    document.getElementById('e-ruolo').value = d.ruolo;
+    document.getElementById('e-password').value = '';
+    document.getElementById('e-ferie').value = d.ferie;
+    document.getElementById('e-malattia').value = d.malattia;
+    document.getElementById('edit-modal').classList.add('active');
+}
+function closeEditModal() { document.getElementById('edit-modal').classList.remove('active'); }
+
+async function aggiungiDipendente() {
+    const errEl = document.getElementById('add-error');
+    const nome = document.getElementById('a-nome').value.trim();
+    if (!nome) { errEl.textContent = 'Inserisci il nome.'; errEl.style.display = 'block'; return; }
+    const r = await fetch('/api/dipendenti', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            nome,
+            ruolo: document.getElementById('a-ruolo').value,
+            password: document.getElementById('a-password').value || 'password123'
+        })
+    });
+    if (r.ok) { closeAddModal(); document.getElementById('a-nome').value = ''; loadStaff(); }
+    else { const e = await r.json(); errEl.textContent = e.errore || 'Errore.'; errEl.style.display = 'block'; }
+}
+
+async function salvaModifica() {
+    const id = document.getElementById('e-id').value;
+    const body = {
+        ruolo: document.getElementById('e-ruolo').value,
+        ferie: parseInt(document.getElementById('e-ferie').value) || 0,
+        malattia: parseInt(document.getElementById('e-malattia').value) || 0
+    };
+    const pw = document.getElementById('e-password').value.trim();
+    if (pw) body.password = pw;
+    await fetch(`/api/dipendenti/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+    });
+    closeEditModal();
+    loadStaff();
+}
+
+async function eliminaDipendente(id, nome) {
+    if (!confirm(`Eliminare ${nome} e tutti i suoi turni?`)) return;
+    await fetch(`/api/dipendenti/${id}`, { method: 'DELETE' });
+    loadStaff();
+}
+
+[document.getElementById('add-modal'), document.getElementById('edit-modal')].forEach(m => {
+    m.addEventListener('click', e => { if (e.target === m) m.classList.remove('active'); });
+});
+
+loadStaff();
+</script>
+{% endblock %}

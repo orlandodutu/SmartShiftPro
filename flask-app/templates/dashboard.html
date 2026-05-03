@@ -1,0 +1,204 @@
+{% extends "base.html" %}
+{% block title %}Dashboard - Gestione Turni{% endblock %}
+{% block extra_styles %}
+<style>
+.stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 16px;
+    margin-bottom: 24px;
+}
+.stat-card {
+    background: white;
+    border-radius: 16px;
+    padding: 20px;
+    text-align: center;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.06);
+    border-top: 3px solid #1a56db;
+}
+.stat-card.notti { border-top-color: #1e293b; }
+.stat-card.ferie { border-top-color: #10b981; }
+.stat-card.malattia { border-top-color: #ef4444; }
+.stat-card .val { font-size: 2.2rem; font-weight: 700; color: #1a56db; }
+.stat-card.notti .val { color: #1e293b; }
+.stat-card.ferie .val { color: #10b981; }
+.stat-card.malattia .val { color: #ef4444; }
+.stat-card .lbl { font-size: 0.82rem; color: #64748b; margin-top: 4px; font-weight: 500; }
+
+.turni-oggi {
+    display: flex; flex-direction: column; gap: 10px;
+}
+.turno-row {
+    display: flex; align-items: center; gap: 14px;
+    padding: 12px 16px; background: #f8fafc; border-radius: 12px;
+    border-left: 4px solid #1a56db;
+}
+.turno-row.NOTTE { border-left-color: #1e293b; }
+.turno-row.MATTINO { border-left-color: #f59e0b; }
+.turno-row.POMERIGGIO { border-left-color: #f97316; }
+.turno-row.FERIE { border-left-color: #10b981; }
+.turno-row.MALATTIA { border-left-color: #ef4444; }
+.turno-row .nome { font-weight: 600; flex: 1; }
+.turno-row .ruolo { font-size: 0.82rem; color: #64748b; }
+
+.top-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+@media (max-width: 700px) { .top-grid { grid-template-columns: 1fr; } }
+
+.riepilogo-list { display: flex; flex-direction: column; gap: 8px; }
+.riepilogo-item {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 14px; background: #f8fafc; border-radius: 10px;
+}
+.riepilogo-item .nome-ruolo { display: flex; flex-direction: column; }
+.riepilogo-item .nome { font-weight: 600; font-size: 0.9rem; }
+.riepilogo-item .ruolo { font-size: 0.78rem; color: #64748b; }
+.riepilogo-item .ore { font-weight: 700; color: #1a56db; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container">
+    <div class="stats-grid" id="stats-grid">
+        <div class="stat-card">
+            <div class="val" id="stat-ore">-</div>
+            <div class="lbl">Ore Totali</div>
+        </div>
+        <div class="stat-card notti">
+            <div class="val" id="stat-notti">-</div>
+            <div class="lbl">Notti Fatte</div>
+        </div>
+        <div class="stat-card ferie">
+            <div class="val" id="stat-ferie">-</div>
+            <div class="lbl">Giorni Ferie</div>
+        </div>
+        <div class="stat-card malattia">
+            <div class="val" id="stat-malattia">-</div>
+            <div class="lbl">Giorni Malattia</div>
+        </div>
+    </div>
+
+    <div class="top-grid">
+        <div class="card">
+            <h2>📅 Turni di Oggi</h2>
+            <div class="turni-oggi" id="turni-oggi">
+                <p style="color:#94a3b8;font-size:0.9rem">Caricamento...</p>
+            </div>
+        </div>
+        <div class="card">
+            <h2>👥 Classifica Ore</h2>
+            <div class="riepilogo-list" id="riepilogo-list">
+                <p style="color:#94a3b8;font-size:0.9rem">Caricamento...</p>
+            </div>
+        </div>
+    </div>
+
+    <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+            <h2 style="margin:0">📊 Riepilogo Staff</h2>
+            <div style="display:flex;gap:10px;align-items:center">
+                <select id="pdf-mese" style="padding:6px 10px;border:1.5px solid #e2e8f0;border-radius:8px;font-size:0.85rem">
+                    <option value="1">Gennaio</option><option value="2">Febbraio</option>
+                    <option value="3">Marzo</option><option value="4">Aprile</option>
+                    <option value="5">Maggio</option><option value="6">Giugno</option>
+                    <option value="7">Luglio</option><option value="8">Agosto</option>
+                    <option value="9">Settembre</option><option value="10">Ottobre</option>
+                    <option value="11">Novembre</option><option value="12">Dicembre</option>
+                </select>
+                <select id="pdf-anno" style="padding:6px 10px;border:1.5px solid #e2e8f0;border-radius:8px;font-size:0.85rem">
+                    <option>2024</option><option>2025</option><option>2026</option>
+                </select>
+                <button class="btn btn-primary" onclick="scaricaPDF()">📄 Scarica PDF</button>
+            </div>
+        </div>
+        <table>
+            <thead>
+                <tr>
+                    <th>Dipendente</th>
+                    <th>Ruolo</th>
+                    <th>Ore Totali</th>
+                    <th>Notti</th>
+                    <th>Ferie</th>
+                    <th>Malattia</th>
+                </tr>
+            </thead>
+            <tbody id="staff-table"></tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const oggi = new Date().toISOString().split('T')[0];
+const meseCorrente = new Date().getMonth() + 1;
+const annoCorrente = new Date().getFullYear();
+
+document.getElementById('pdf-mese').value = meseCorrente;
+document.getElementById('pdf-anno').value = annoCorrente;
+
+async function loadDashboard() {
+    const [meRes, statRes, turniRes] = await Promise.all([
+        fetch('/api/me'),
+        fetch('/api/statistiche'),
+        fetch(`/api/turni?mese=${meseCorrente}&anno=${annoCorrente}`)
+    ]);
+
+    const me = await meRes.json();
+    document.getElementById('stat-ore').textContent = me.ore_totali;
+    document.getElementById('stat-notti').textContent = me.notti_fatte;
+    document.getElementById('stat-ferie').textContent = me.ferie;
+    document.getElementById('stat-malattia').textContent = me.malattia;
+
+    const stats = await statRes.json();
+    const sorted = [...stats].sort((a, b) => b.ore_totali - a.ore_totali);
+    const riepilogoEl = document.getElementById('riepilogo-list');
+    riepilogoEl.innerHTML = sorted.slice(0, 6).map(s => `
+        <div class="riepilogo-item">
+            <div class="nome-ruolo">
+                <span class="nome">${s.nome}</span>
+                <span class="ruolo">${s.ruolo}</span>
+            </div>
+            <span class="ore">${s.ore_totali}h</span>
+        </div>
+    `).join('');
+
+    const staffEl = document.getElementById('staff-table');
+    staffEl.innerHTML = stats.map(s => `
+        <tr>
+            <td><strong>${s.nome}</strong></td>
+            <td><span class="badge badge-${s.ruolo}">${s.ruolo}</span></td>
+            <td>${s.ore_totali}h</td>
+            <td>${s.notti_fatte}</td>
+            <td>${s.ferie}</td>
+            <td>${s.malattia}</td>
+        </tr>
+    `).join('');
+
+    const turniAll = await turniRes.json();
+    const turniOggi = turniAll.filter(t => t.data === oggi);
+    const oggiEl = document.getElementById('turni-oggi');
+    if (turniOggi.length === 0) {
+        oggiEl.innerHTML = '<p style="color:#94a3b8;font-size:0.9rem">Nessun turno registrato per oggi.</p>';
+    } else {
+        oggiEl.innerHTML = turniOggi.map(t => `
+            <div class="turno-row ${t.tipo}">
+                <div>
+                    <div class="nome">${t.nome}</div>
+                    <div class="ruolo">${t.ruolo}</div>
+                </div>
+                <span class="turno-badge turno-${t.tipo}">${t.tipo}</span>
+                <span style="font-size:0.82rem;color:#64748b">${t.ore}h</span>
+            </div>
+        `).join('');
+    }
+}
+
+function scaricaPDF() {
+    const mese = document.getElementById('pdf-mese').value;
+    const anno = document.getElementById('pdf-anno').value;
+    window.open(`/api/genera_report_mensile?mese=${mese}&anno=${anno}`, '_blank');
+}
+
+loadDashboard();
+</script>
+{% endblock %}

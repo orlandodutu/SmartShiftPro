@@ -1,0 +1,222 @@
+{% extends "base.html" %}
+{% block title %}Turni - Gestione Turni{% endblock %}
+{% block extra_styles %}
+<style>
+.filters {
+    display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-bottom: 20px;
+}
+.filters select, .filters input {
+    padding: 9px 14px; border: 1.5px solid #e2e8f0; border-radius: 10px;
+    font-size: 0.9rem; background: white;
+}
+.table-container { overflow-x: auto; }
+.empty-state {
+    text-align: center; padding: 50px 20px; color: #94a3b8;
+}
+.empty-state .icon { font-size: 3rem; margin-bottom: 12px; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container">
+    <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
+            <h2 style="margin:0">📋 Gestione Turni</h2>
+            <button class="btn btn-primary" onclick="openModal()">+ Aggiungi Turno</button>
+        </div>
+
+        <div class="filters">
+            <select id="filter-mese" onchange="loadTurni()">
+                <option value="1">Gennaio</option><option value="2">Febbraio</option>
+                <option value="3">Marzo</option><option value="4">Aprile</option>
+                <option value="5">Maggio</option><option value="6">Giugno</option>
+                <option value="7">Luglio</option><option value="8">Agosto</option>
+                <option value="9">Settembre</option><option value="10">Ottobre</option>
+                <option value="11">Novembre</option><option value="12">Dicembre</option>
+            </select>
+            <select id="filter-anno" onchange="loadTurni()">
+                <option>2024</option><option>2025</option><option>2026</option>
+            </select>
+            <select id="filter-dipendente" onchange="loadTurni()">
+                <option value="">Tutti i dipendenti</option>
+            </select>
+            <select id="filter-tipo" onchange="loadTurni()">
+                <option value="">Tutti i turni</option>
+                <option>MATTINO</option><option>POMERIGGIO</option><option>NOTTE</option>
+                <option>FERIE</option><option>MALATTIA</option><option>RIPOSO</option>
+            </select>
+        </div>
+
+        <div class="table-container">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Data</th>
+                        <th>Dipendente</th>
+                        <th>Ruolo</th>
+                        <th>Turno</th>
+                        <th>Ore</th>
+                        <th>Note</th>
+                        <th>Azioni</th>
+                    </tr>
+                </thead>
+                <tbody id="turni-table"></tbody>
+            </table>
+            <div id="empty-state" class="empty-state" style="display:none">
+                <div class="icon">📭</div>
+                <p>Nessun turno trovato per questo periodo.</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal Aggiungi Turno -->
+<div class="modal-overlay" id="modal">
+    <div class="modal">
+        <h3>+ Aggiungi Turno</h3>
+        <div class="form-group">
+            <label>Dipendente</label>
+            <select id="m-dipendente"></select>
+        </div>
+        <div class="form-group">
+            <label>Data</label>
+            <input type="date" id="m-data" />
+        </div>
+        <div class="form-group">
+            <label>Tipo Turno</label>
+            <select id="m-tipo">
+                <option>MATTINO</option>
+                <option>POMERIGGIO</option>
+                <option>NOTTE</option>
+                <option>FERIE</option>
+                <option>MALATTIA</option>
+                <option>RIPOSO</option>
+            </select>
+        </div>
+        <div class="form-group">
+            <label>Note (opzionale)</label>
+            <input type="text" id="m-note" placeholder="Note..." />
+        </div>
+        <div id="modal-error" class="alert alert-error" style="display:none"></div>
+        <div class="modal-actions">
+            <button class="btn btn-secondary" onclick="closeModal()">Annulla</button>
+            <button class="btn btn-primary" onclick="salvaT()">Salva</button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const meseCorrente = new Date().getMonth() + 1;
+const annoCorrente = new Date().getFullYear();
+let dipendenti = [];
+
+document.getElementById('filter-mese').value = meseCorrente;
+document.getElementById('filter-anno').value = annoCorrente;
+document.getElementById('m-data').value = new Date().toISOString().split('T')[0];
+
+async function init() {
+    const r = await fetch('/api/dipendenti');
+    dipendenti = await r.json();
+    const sel = document.getElementById('filter-dipendente');
+    const mSel = document.getElementById('m-dipendente');
+    dipendenti.forEach(d => {
+        sel.innerHTML += `<option value="${d.id}">${d.nome} (${d.ruolo})</option>`;
+        mSel.innerHTML += `<option value="${d.id}">${d.nome} (${d.ruolo})</option>`;
+    });
+    loadTurni();
+}
+
+async function loadTurni() {
+    const mese = document.getElementById('filter-mese').value;
+    const anno = document.getElementById('filter-anno').value;
+    const dipId = document.getElementById('filter-dipendente').value;
+    const tipo = document.getElementById('filter-tipo').value;
+
+    let url = `/api/turni?mese=${mese}&anno=${anno}`;
+    if (dipId) url += `&dipendente_id=${dipId}`;
+
+    const r = await fetch(url);
+    let turni = await r.json();
+    if (tipo) turni = turni.filter(t => t.tipo === tipo);
+
+    const tbody = document.getElementById('turni-table');
+    const emptyEl = document.getElementById('empty-state');
+
+    if (turni.length === 0) {
+        tbody.innerHTML = '';
+        emptyEl.style.display = 'block';
+        return;
+    }
+    emptyEl.style.display = 'none';
+    tbody.innerHTML = turni.map(t => `
+        <tr>
+            <td>${formatDate(t.data)}</td>
+            <td><strong>${t.nome}</strong></td>
+            <td><span class="badge badge-${t.ruolo}">${t.ruolo}</span></td>
+            <td><span class="turno-badge turno-${t.tipo}">${t.tipo}</span></td>
+            <td>${t.ore}h</td>
+            <td style="color:#64748b;font-size:0.85rem">${t.note || '-'}</td>
+            <td>
+                <button class="btn btn-danger" style="padding:5px 12px;font-size:0.8rem" onclick="eliminaTurno(${t.id})">Elimina</button>
+            </td>
+        </tr>
+    `).join('');
+}
+
+function formatDate(d) {
+    const [y, m, day] = d.split('-');
+    return `${day}/${m}/${y}`;
+}
+
+function openModal() {
+    document.getElementById('modal').classList.add('active');
+    document.getElementById('modal-error').style.display = 'none';
+}
+
+function closeModal() {
+    document.getElementById('modal').classList.remove('active');
+}
+
+async function salvaT() {
+    const errEl = document.getElementById('modal-error');
+    errEl.style.display = 'none';
+    const body = {
+        dipendente_id: parseInt(document.getElementById('m-dipendente').value),
+        data: document.getElementById('m-data').value,
+        tipo: document.getElementById('m-tipo').value,
+        note: document.getElementById('m-note').value
+    };
+    if (!body.data) {
+        errEl.textContent = 'Seleziona una data.';
+        errEl.style.display = 'block';
+        return;
+    }
+    const r = await fetch('/api/turni', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+    });
+    if (r.ok) {
+        closeModal();
+        loadTurni();
+    } else {
+        errEl.textContent = 'Errore nel salvataggio.';
+        errEl.style.display = 'block';
+    }
+}
+
+async function eliminaTurno(id) {
+    if (!confirm('Eliminare questo turno?')) return;
+    await fetch(`/api/turni/${id}`, { method: 'DELETE' });
+    loadTurni();
+}
+
+document.getElementById('modal').addEventListener('click', e => {
+    if (e.target === document.getElementById('modal')) closeModal();
+});
+
+init();
+</script>
+{% endblock %}
