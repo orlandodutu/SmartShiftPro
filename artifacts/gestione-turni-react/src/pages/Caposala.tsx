@@ -47,7 +47,7 @@ export default function Caposala() {
       if (res.ok) {
         const data = await res.json();
         toast({
-          title: `Turni generati con successo`,
+          title: "Turni generati",
           description: `${data.generati} turni creati su ${data.giorni} giorni (${data.saltati} saltati)`,
         });
       } else {
@@ -79,9 +79,10 @@ export default function Caposala() {
       if (res.ok) {
         toast({
           title: azione === "approva" ? "Scambio approvato" : "Scambio rifiutato",
-          description: azione === "approva"
-            ? `Lo scambio tra ${activeRequest.richiedente_nome} e ${activeRequest.destinatario_nome} è stato approvato.`
-            : `La richiesta di ${activeRequest.richiedente_nome} è stata rifiutata.`,
+          description:
+            azione === "approva"
+              ? `Approvato tra ${activeRequest.richiedente_nome} e ${activeRequest.destinatario_nome}`
+              : `Rifiutata la richiesta di ${activeRequest.richiedente_nome}`,
         });
         setActiveRequest(null);
         fetchRichieste();
@@ -97,9 +98,9 @@ export default function Caposala() {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="text-center space-y-2">
-          <ShieldAlert className="h-12 w-12 text-red-400 mx-auto" />
-          <p className="text-lg font-semibold text-gray-700">Accesso negato</p>
-          <p className="text-sm text-gray-400">Quest'area è riservata alla Caposala.</p>
+          <ShieldAlert className="h-12 w-12 text-red-400/60 mx-auto" />
+          <p className="text-lg font-semibold text-foreground">Accesso negato</p>
+          <p className="text-sm text-muted-foreground">Quest'area è riservata alla Caposala.</p>
         </div>
       </div>
     );
@@ -108,39 +109,39 @@ export default function Caposala() {
   return (
     <div className="min-h-screen">
       {/* Pale gold hero header */}
-      <div className="bg-yellow-50 border-b border-yellow-200 px-6 md:px-10 py-8">
+      <div className="bg-yellow-950/40 border-b border-yellow-800/40 px-6 md:px-10 py-8">
         <div className="max-w-5xl mx-auto flex items-center gap-5">
-          <div className="h-14 w-14 rounded-2xl bg-yellow-100 text-yellow-700 flex items-center justify-center shadow-sm">
+          <div className="h-14 w-14 rounded-2xl bg-yellow-900/60 text-yellow-400 flex items-center justify-center shadow-sm">
             <ShieldAlert className="h-7 w-7" />
           </div>
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">Area Caposala</h1>
-            <p className="text-sm text-yellow-700 font-medium mt-0.5">Gestione turni e approvazione scambi</p>
+            <h1 className="text-2xl font-bold text-foreground">Area Caposala</h1>
+            <p className="text-sm text-yellow-400 font-medium mt-0.5">Gestione turni e approvazione scambi</p>
           </div>
         </div>
       </div>
 
       <div className="p-6 md:p-10 max-w-5xl mx-auto space-y-10">
 
-        {/* Auto-generate section */}
+        {/* Auto-generate */}
         <section>
-          <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-widest mb-4">Generazione Automatica Turni</h2>
+          <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-widest mb-4">Generazione Automatica Turni</h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <button
               onClick={() => handleGenera("settimana")}
               disabled={genLoading !== null}
               data-testid="btn-genera-settimana"
-              className="group relative overflow-hidden rounded-2xl border-2 border-blue-200 bg-gradient-to-br from-blue-50 to-blue-100 p-6 text-left shadow-sm transition-all hover:shadow-md hover:border-blue-300 disabled:opacity-60 disabled:cursor-not-allowed"
+              className="group relative overflow-hidden rounded-2xl border border-blue-500/20 bg-blue-950/40 p-6 text-left transition-all hover:bg-blue-950/60 hover:border-blue-400/40 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <div className="flex items-start gap-4">
                 <div className="rounded-xl bg-blue-500 p-3 shadow-sm">
                   <CalendarRange className="h-6 w-6 text-white" />
                 </div>
                 <div>
-                  <p className="font-bold text-gray-900 text-lg leading-tight">
+                  <p className="font-bold text-foreground text-lg leading-tight">
                     {genLoading === "settimana" ? "Generazione..." : "Genera Turni Settimanali"}
                   </p>
-                  <p className="text-sm text-gray-500 mt-1">Pianifica i prossimi 7 giorni a partire da oggi</p>
+                  <p className="text-sm text-muted-foreground mt-1">Pianifica i prossimi 7 giorni</p>
                 </div>
               </div>
             </button>
@@ -149,74 +150,73 @@ export default function Caposala() {
               onClick={() => handleGenera("mese")}
               disabled={genLoading !== null}
               data-testid="btn-genera-mese"
-              className="group relative overflow-hidden rounded-2xl border-2 border-emerald-200 bg-gradient-to-br from-emerald-50 to-emerald-100 p-6 text-left shadow-sm transition-all hover:shadow-md hover:border-emerald-300 disabled:opacity-60 disabled:cursor-not-allowed"
+              className="group relative overflow-hidden rounded-2xl border border-emerald-500/20 bg-emerald-950/40 p-6 text-left transition-all hover:bg-emerald-950/60 hover:border-emerald-400/40 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <div className="flex items-start gap-4">
                 <div className="rounded-xl bg-emerald-500 p-3 shadow-sm">
                   <Calendar className="h-6 w-6 text-white" />
                 </div>
                 <div>
-                  <p className="font-bold text-gray-900 text-lg leading-tight">
+                  <p className="font-bold text-foreground text-lg leading-tight">
                     {genLoading === "mese" ? "Generazione..." : "Genera Turni Mensili"}
                   </p>
-                  <p className="text-sm text-gray-500 mt-1">Pianifica i prossimi 30 giorni a partire da oggi</p>
+                  <p className="text-sm text-muted-foreground mt-1">Pianifica i prossimi 30 giorni</p>
                 </div>
               </div>
             </button>
           </div>
         </section>
 
-        {/* Swap requests section */}
+        {/* Swap requests */}
         <section>
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-widest">Richieste di Scambio in Attesa</h2>
-            <span className="text-sm font-semibold text-gray-700 bg-gray-100 px-3 py-0.5 rounded-full">
+            <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-widest">Richieste in Attesa</h2>
+            <span className="text-sm font-bold text-foreground bg-white/5 border border-white/10 px-3 py-0.5 rounded-full">
               {loading ? "—" : richieste.length}
             </span>
           </div>
 
           <div className="space-y-4">
             {loading ? (
-              <p className="text-sm text-gray-400 text-center py-8">Caricamento...</p>
+              <p className="text-sm text-muted-foreground text-center py-10">Caricamento...</p>
             ) : richieste.length === 0 ? (
-              <div className="rounded-2xl border-2 border-dashed border-gray-200 bg-gray-50 p-10 text-center">
-                <ArrowLeftRight className="h-8 w-8 text-gray-300 mx-auto mb-3" />
-                <p className="text-gray-400 font-medium">Nessuna richiesta in sospeso</p>
-                <p className="text-sm text-gray-300 mt-1">Tutte le richieste sono state gestite</p>
+              <div className="glass rounded-2xl border border-white/8 p-10 text-center">
+                <ArrowLeftRight className="h-8 w-8 text-muted-foreground/20 mx-auto mb-3" />
+                <p className="text-muted-foreground font-medium">Nessuna richiesta in sospeso</p>
+                <p className="text-sm text-muted-foreground/50 mt-1">Tutte le richieste sono state gestite</p>
               </div>
             ) : (
               richieste.map((r) => (
-                <Card key={r.id} className="shadow-sm overflow-hidden">
+                <Card key={r.id} className="glass border-white/8 shadow-none overflow-hidden">
                   <CardContent className="p-0">
                     <div className="p-6 flex flex-col md:flex-row gap-6">
-                      {/* Request info */}
                       <div className="flex-1 space-y-4 min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
-                          <span className="font-semibold text-gray-900">{r.richiedente_nome}</span>
+                          <span className="font-semibold text-foreground">{r.richiedente_nome}</span>
                           <RoleBadge role={r.richiedente_ruolo} />
-                          <ArrowLeftRight className="h-4 w-4 text-gray-400 shrink-0" />
-                          <span className="font-semibold text-gray-900">{r.destinatario_nome}</span>
+                          <ArrowLeftRight className="h-4 w-4 text-muted-foreground/50 shrink-0" />
+                          <span className="font-semibold text-foreground">{r.destinatario_nome}</span>
                           <RoleBadge role={r.destinatario_ruolo} />
                         </div>
 
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                          <div className="rounded-xl bg-gray-50 border border-gray-100 p-3">
-                            <p className="text-xs text-gray-400 font-semibold uppercase tracking-wide mb-2">Turno ceduto</p>
+                          <div className="rounded-xl bg-white/4 border border-white/8 p-3">
+                            <p className="text-[10px] text-muted-foreground font-semibold uppercase tracking-wide mb-2">Turno ceduto</p>
                             {r.turno_richiedente ? (
                               <div className="flex items-center gap-2 flex-wrap">
                                 <ShiftBadge type={r.turno_richiedente.tipo} />
-                                <span className="text-sm font-medium text-gray-700">
+                                <span className="text-sm font-medium text-foreground">
                                   {new Date(r.turno_richiedente.data + "T00:00:00").toLocaleDateString("it-IT", { day: "numeric", month: "short" })}
                                 </span>
                               </div>
-                            ) : <span className="text-sm text-gray-400">Non specificato</span>}
+                            ) : <span className="text-sm text-muted-foreground">Non specificato</span>}
                           </div>
                           {r.turno_destinatario && (
-                            <div className="rounded-xl bg-gray-50 border border-gray-100 p-3">
-                              <p className="text-xs text-gray-400 font-semibold uppercase tracking-wide mb-2">Turno ricevuto</p>
+                            <div className="rounded-xl bg-white/4 border border-white/8 p-3">
+                              <p className="text-[10px] text-muted-foreground font-semibold uppercase tracking-wide mb-2">Turno ricevuto</p>
                               <div className="flex items-center gap-2 flex-wrap">
                                 <ShiftBadge type={r.turno_destinatario.tipo} />
-                                <span className="text-sm font-medium text-gray-700">
+                                <span className="text-sm font-medium text-foreground">
                                   {new Date(r.turno_destinatario.data + "T00:00:00").toLocaleDateString("it-IT", { day: "numeric", month: "short" })}
                                 </span>
                               </div>
@@ -225,21 +225,20 @@ export default function Caposala() {
                         </div>
 
                         {r.nota && (
-                          <p className="text-sm text-gray-600 bg-yellow-50 border border-yellow-100 rounded-lg px-3 py-2">
-                            <span className="font-medium text-yellow-700">Motivazione:</span> {r.nota}
+                          <p className="text-sm text-amber-300/80 bg-amber-500/8 border border-amber-500/15 rounded-lg px-3 py-2">
+                            <span className="font-semibold">Motivazione:</span> {r.nota}
                           </p>
                         )}
-
-                        <p className="text-xs text-gray-400">
+                        <p className="text-xs text-muted-foreground/50">
                           Richiesta il {new Date(r.creata_il).toLocaleDateString("it-IT", { day: "numeric", month: "long", year: "numeric" })}
                         </p>
                       </div>
 
                       {/* Big action buttons */}
-                      <div className="flex flex-row md:flex-col gap-3 md:w-36 shrink-0 md:justify-center">
+                      <div className="flex flex-row md:flex-col gap-3 md:w-32 shrink-0 md:justify-center">
                         <Button
                           size="lg"
-                          className="flex-1 md:flex-none md:w-full bg-emerald-600 hover:bg-emerald-700 text-white gap-2 py-5 rounded-xl shadow-sm font-semibold"
+                          className="flex-1 md:flex-none md:w-full bg-emerald-600 hover:bg-emerald-500 text-white gap-2 py-5 rounded-xl font-bold"
                           onClick={() => openAction(r, "approva")}
                           data-testid={`approva-${r.id}`}
                         >
@@ -249,7 +248,7 @@ export default function Caposala() {
                         <Button
                           size="lg"
                           variant="outline"
-                          className="flex-1 md:flex-none md:w-full border-2 border-red-200 text-red-600 hover:bg-red-50 hover:border-red-300 gap-2 py-5 rounded-xl font-semibold"
+                          className="flex-1 md:flex-none md:w-full border-2 border-red-500/30 text-red-400 hover:bg-red-500/10 hover:border-red-400/50 gap-2 py-5 rounded-xl font-bold"
                           onClick={() => openAction(r, "rifiuta")}
                           data-testid={`rifiuta-${r.id}`}
                         >
@@ -268,40 +267,37 @@ export default function Caposala() {
 
       {/* Confirmation Dialog */}
       <Dialog open={!!activeRequest} onOpenChange={(open) => !open && setActiveRequest(null)}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="glass-strong border-white/10 max-w-md">
           <DialogHeader>
-            <DialogTitle className={`flex items-center gap-2 ${azione === "approva" ? "text-emerald-700" : "text-red-600"}`}>
+            <DialogTitle className={`flex items-center gap-2 ${azione === "approva" ? "text-emerald-400" : "text-red-400"}`}>
               {azione === "approva"
                 ? <><Check className="h-5 w-5" /> Conferma Approvazione</>
-                : <><X className="h-5 w-5" /> Conferma Rifiuto</>
-              }
+                : <><X className="h-5 w-5" /> Conferma Rifiuto</>}
             </DialogTitle>
           </DialogHeader>
-
           <div className="space-y-4">
             {activeRequest && (
-              <div className="rounded-xl bg-gray-50 border p-3 text-sm text-gray-600">
-                Scambio tra <strong>{activeRequest.richiedente_nome}</strong> e <strong>{activeRequest.destinatario_nome}</strong>
+              <div className="rounded-xl bg-white/5 border border-white/8 p-3 text-sm text-muted-foreground">
+                Scambio tra <strong className="text-foreground">{activeRequest.richiedente_nome}</strong> e <strong className="text-foreground">{activeRequest.destinatario_nome}</strong>
               </div>
             )}
-
             <div className="space-y-2">
-              <Label>Nota per lo staff <span className="text-gray-400 font-normal">(opzionale)</span></Label>
+              <Label className="text-muted-foreground">Nota per lo staff <span className="text-muted-foreground/50 font-normal">(opzionale)</span></Label>
               <Textarea
                 placeholder={azione === "approva" ? "Es. Ricordate di coprire la mattina..." : "Es. Non è possibile per mancanza di copertura..."}
                 value={notaCaposala}
                 onChange={(e) => setNotaCaposala(e.target.value)}
                 rows={3}
+                className="border-white/10 bg-white/5 resize-none"
                 data-testid="caposala-note"
               />
             </div>
-
             <div className="flex gap-3">
-              <Button variant="outline" className="flex-1" onClick={() => setActiveRequest(null)} disabled={actionLoading}>
+              <Button variant="outline" className="flex-1 border-white/10 hover:bg-white/5" onClick={() => setActiveRequest(null)} disabled={actionLoading}>
                 Annulla
               </Button>
               <Button
-                className={`flex-1 gap-2 ${azione === "approva" ? "bg-emerald-600 hover:bg-emerald-700" : "bg-red-600 hover:bg-red-700"} text-white`}
+                className={`flex-1 gap-2 ${azione === "approva" ? "bg-emerald-600 hover:bg-emerald-500" : "bg-red-600 hover:bg-red-500"} text-white`}
                 onClick={handleConfirm}
                 disabled={actionLoading}
                 data-testid="confirm-action"

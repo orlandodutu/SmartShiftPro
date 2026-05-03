@@ -7,11 +7,11 @@ import { RoleBadge } from "@/components/ui/RoleBadge";
 import type { Ruolo } from "@/lib/api";
 
 const ROLE_AVATAR: Record<Ruolo, string> = {
-  OSS:        "bg-blue-100 text-blue-700",
-  INFERMIERA: "bg-emerald-100 text-emerald-700",
-  PULIZIE:    "bg-amber-100 text-amber-700",
-  DEV:        "bg-indigo-100 text-indigo-700",
-  CAPOSALA:   "bg-yellow-100 text-yellow-700",
+  OSS:        "bg-blue-900/60 text-blue-300",
+  INFERMIERA: "bg-emerald-900/60 text-emerald-300",
+  PULIZIE:    "bg-amber-900/60 text-amber-300",
+  DEV:        "bg-indigo-900/60 text-indigo-300",
+  CAPOSALA:   "bg-yellow-900/60 text-yellow-300",
 };
 
 const ROLE_DOT: Record<Ruolo, string> = {
@@ -41,18 +41,27 @@ export function AppLayout({ children }: { children: ReactNode }) {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col md:flex-row">
+    <div className="min-h-screen flex flex-col md:flex-row">
       {/* Sidebar */}
-      <aside className="w-full md:w-64 bg-white border-r border-gray-100 flex flex-col shadow-sm">
+      <aside
+        className="w-full md:w-60 flex flex-col border-r"
+        style={{
+          background: "rgba(8, 12, 23, 0.85)",
+          backdropFilter: "blur(16px)",
+          borderColor: "rgba(255,255,255,0.07)",
+        }}
+      >
         {/* Brand */}
-        <div className="px-6 py-5 border-b border-gray-100">
+        <div className="px-5 py-5 border-b" style={{ borderColor: "rgba(255,255,255,0.07)" }}>
           <div className="flex items-center gap-2.5">
             <div className={`h-8 w-8 rounded-lg ${dotClass} flex items-center justify-center`}>
               <CalendarDays className="h-4 w-4 text-white" />
             </div>
             <div>
-              <h1 className="text-base font-bold text-gray-900 leading-none">Gestione Turni</h1>
-              <p className="text-xs text-gray-400 mt-0.5">Health Coordinator</p>
+              <h1 className="text-base font-black leading-none">
+                Smart<span className="text-gold">Shift</span>
+              </h1>
+              <p className="text-[10px] text-muted-foreground tracking-widest uppercase mt-0.5">Pro</p>
             </div>
           </div>
         </div>
@@ -65,13 +74,13 @@ export function AppLayout({ children }: { children: ReactNode }) {
               <Link
                 key={item.href}
                 href={item.href}
-                className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors ${
+                className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all ${
                   isActive
-                    ? "bg-primary/8 text-primary font-semibold"
-                    : "text-gray-500 hover:bg-gray-50 hover:text-gray-800"
+                    ? "bg-amber-500/15 text-amber-400 border border-amber-500/20"
+                    : "text-muted-foreground hover:text-foreground hover:bg-white/5"
                 }`}
               >
-                <item.icon className={`h-4 w-4 shrink-0 ${isActive ? "text-primary" : "text-gray-400"}`} />
+                <item.icon className={`h-4 w-4 shrink-0 ${isActive ? "text-amber-400" : "text-muted-foreground"}`} />
                 {item.label}
                 {item.href === "/caposala" && (
                   <span className={`ml-auto h-1.5 w-1.5 rounded-full ${dotClass}`} />
@@ -82,13 +91,16 @@ export function AppLayout({ children }: { children: ReactNode }) {
         </nav>
 
         {/* User section */}
-        <div className="p-4 border-t border-gray-100">
+        <div
+          className="p-4 border-t"
+          style={{ borderColor: "rgba(255,255,255,0.07)" }}
+        >
           <div className="flex items-center gap-3 mb-3">
             <div className={`h-9 w-9 rounded-xl ${avatarClass} flex items-center justify-center text-sm font-bold shrink-0`}>
               {user?.nome.charAt(0)}
             </div>
             <div className="flex-1 min-w-0">
-              <p className="text-sm font-semibold text-gray-900 truncate leading-tight">{user?.nome}</p>
+              <p className="text-sm font-semibold text-foreground truncate leading-tight">{user?.nome}</p>
               <div className="mt-1">
                 <RoleBadge role={user?.ruolo ?? "OSS"} className="text-xs" />
               </div>
@@ -97,7 +109,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
           <Button
             variant="ghost"
             size="sm"
-            className="w-full justify-start text-gray-400 hover:text-gray-700 text-xs"
+            className="w-full justify-start text-muted-foreground hover:text-foreground text-xs"
             onClick={logout}
           >
             <LogOut className="h-3.5 w-3.5 mr-2" />

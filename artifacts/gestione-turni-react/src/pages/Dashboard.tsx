@@ -14,12 +14,12 @@ import { useToast } from "@/hooks/use-toast";
 import { Clock, Moon, CalendarOff, Pill, ArrowLeftRight, User } from "lucide-react";
 import type { Ruolo } from "@/lib/api";
 
-const ROLE_THEME: Record<Ruolo, { bg: string; border: string; accent: string; avatar: string }> = {
-  OSS:        { bg: "bg-blue-50",    border: "border-blue-200",    accent: "text-blue-700",   avatar: "bg-blue-100 text-blue-700" },
-  INFERMIERA: { bg: "bg-emerald-50", border: "border-emerald-200", accent: "text-emerald-700", avatar: "bg-emerald-100 text-emerald-700" },
-  PULIZIE:    { bg: "bg-amber-50",   border: "border-amber-200",   accent: "text-amber-700",   avatar: "bg-amber-100 text-amber-700" },
-  DEV:        { bg: "bg-indigo-50",  border: "border-indigo-200",  accent: "text-indigo-700",  avatar: "bg-indigo-100 text-indigo-700" },
-  CAPOSALA:   { bg: "bg-yellow-50",  border: "border-yellow-200",  accent: "text-yellow-700",  avatar: "bg-yellow-100 text-yellow-700" },
+const ROLE_THEME: Record<Ruolo, { bg: string; border: string; accent: string; avatar: string; dot: string }> = {
+  OSS:        { bg: "bg-blue-950/40",    border: "border-blue-800/50",    accent: "text-blue-300",    avatar: "bg-blue-900/60 text-blue-300",    dot: "bg-blue-400"    },
+  INFERMIERA: { bg: "bg-emerald-950/40", border: "border-emerald-800/50", accent: "text-emerald-300", avatar: "bg-emerald-900/60 text-emerald-300", dot: "bg-emerald-400" },
+  PULIZIE:    { bg: "bg-amber-950/40",   border: "border-amber-800/50",   accent: "text-amber-300",   avatar: "bg-amber-900/60 text-amber-300",   dot: "bg-amber-400"   },
+  DEV:        { bg: "bg-indigo-950/40",  border: "border-indigo-800/50",  accent: "text-indigo-300",  avatar: "bg-indigo-900/60 text-indigo-300",  dot: "bg-indigo-400"  },
+  CAPOSALA:   { bg: "bg-yellow-950/40",  border: "border-yellow-800/50",  accent: "text-yellow-300",  avatar: "bg-yellow-900/60 text-yellow-300",  dot: "bg-yellow-400"  },
 };
 
 export default function Dashboard() {
@@ -32,7 +32,6 @@ export default function Dashboard() {
   const [meiTurni, setMeiTurni] = useState<Turno[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // swap dialog state
   const [swapOpen, setSwapOpen] = useState(false);
   const [swapTurno, setSwapTurno] = useState<Turno | null>(null);
   const [dipendenti, setDipendenti] = useState<Dipendente[]>([]);
@@ -58,9 +57,7 @@ export default function Dashboard() {
       if (turniRes.ok) {
         const all: Turno[] = await turniRes.json();
         const todayStr = today.toISOString().split("T")[0];
-        const upcoming = all
-          .filter((t) => t.data >= todayStr)
-          .sort((a, b) => a.data.localeCompare(b.data));
+        const upcoming = all.filter((t) => t.data >= todayStr).sort((a, b) => a.data.localeCompare(b.data));
         setMeiTurni(upcoming.slice(0, 10));
       }
       if (dipRes.ok) setDipendenti(await dipRes.json());
@@ -120,84 +117,82 @@ export default function Dashboard() {
   const myStats = stats.find((s) => s.id === user?.id) ?? user;
 
   const statCards = [
-    { label: "Ore Totali",   value: myStats?.ore_totali  ?? 0, icon: Clock,       bg: "bg-blue-100",   text: "text-blue-600"   },
-    { label: "Notti Fatte",  value: myStats?.notti_fatte ?? 0, icon: Moon,        bg: "bg-slate-100",  text: "text-slate-700"  },
-    { label: "Ferie",        value: myStats?.ferie       ?? 0, icon: CalendarOff, bg: "bg-emerald-100",text: "text-emerald-600" },
-    { label: "Malattia",     value: myStats?.malattia    ?? 0, icon: Pill,        bg: "bg-red-100",    text: "text-red-600"    },
+    { label: "Ore Totali",  value: myStats?.ore_totali  ?? 0, icon: Clock,        color: "text-gold",        bg: "bg-amber-500/10"   },
+    { label: "Notti Fatte", value: myStats?.notti_fatte ?? 0, icon: Moon,         color: "text-slate-300",   bg: "bg-slate-500/10"   },
+    { label: "Ferie",       value: myStats?.ferie       ?? 0, icon: CalendarOff,  color: "text-emerald-400", bg: "bg-emerald-500/10" },
+    { label: "Malattia",    value: myStats?.malattia    ?? 0, icon: Pill,         color: "text-red-400",     bg: "bg-red-500/10"     },
   ];
 
   return (
     <div className="min-h-screen">
-      {/* Role-tinted hero header */}
+      {/* Role-tinted hero */}
       <div className={`${theme.bg} border-b ${theme.border} px-6 md:px-10 py-8`}>
         <div className="max-w-7xl mx-auto flex items-center gap-5">
-          <div className={`h-16 w-16 rounded-2xl ${theme.avatar} flex items-center justify-center text-2xl font-bold shadow-sm`}>
+          <div className={`h-16 w-16 rounded-2xl ${theme.avatar} flex items-center justify-center text-2xl font-black`}>
             {user?.nome.charAt(0)}
           </div>
           <div>
             <div className="flex items-center gap-3 mb-1">
-              <h1 className="text-2xl font-bold text-gray-900">{user?.nome}</h1>
+              <h1 className="text-2xl font-bold text-foreground">{user?.nome}</h1>
               <RoleBadge role={role} />
             </div>
             <p className={`text-sm font-medium ${theme.accent}`}>
-              {role === "CAPOSALA" ? "Coordinatrice — Area Riservata disponibile nel menu" : "Dashboard personale"}
+              {role === "CAPOSALA" ? "Coordinatrice — Area riservata disponibile nel menu" : "Dashboard personale"}
             </p>
           </div>
         </div>
       </div>
 
       <div className="p-6 md:p-10 max-w-7xl mx-auto space-y-8">
-        {/* Stats cards */}
+        {/* Stat cards */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          {statCards.map(({ label, value, icon: Icon, bg, text }) => (
-            <Card key={label} className="shadow-sm">
-              <CardContent className="p-5 flex items-center gap-4">
-                <div className={`p-3 ${bg} ${text} rounded-xl`}>
-                  <Icon className="h-5 w-5" />
-                </div>
-                <div>
-                  <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">{label}</p>
-                  <p className="text-2xl font-bold text-gray-900 mt-0.5">{value}</p>
-                </div>
-              </CardContent>
-            </Card>
+          {statCards.map(({ label, value, icon: Icon, color, bg }) => (
+            <div key={label} className="glass rounded-2xl p-5 flex items-center gap-4">
+              <div className={`p-3 ${bg} ${color} rounded-xl`}>
+                <Icon className="h-5 w-5" />
+              </div>
+              <div>
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">{label}</p>
+                <p className={`text-2xl font-black mt-0.5 ${color}`}>{value}</p>
+              </div>
+            </div>
           ))}
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-5 gap-8">
           {/* My upcoming shifts */}
           <div className="lg:col-span-3">
-            <Card className="shadow-sm">
+            <Card className="glass border-white/8 shadow-none">
               <CardHeader className="pb-3">
-                <CardTitle className="text-base font-semibold">I miei prossimi turni</CardTitle>
+                <CardTitle className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">I miei prossimi turni</CardTitle>
               </CardHeader>
               <CardContent>
                 {loading ? (
-                  <p className="text-sm text-gray-400 py-4 text-center">Caricamento...</p>
+                  <p className="text-sm text-muted-foreground py-4 text-center">Caricamento...</p>
                 ) : meiTurni.length === 0 ? (
-                  <p className="text-sm text-gray-400 py-6 text-center">Nessun turno in programma</p>
+                  <p className="text-sm text-muted-foreground py-6 text-center">Nessun turno in programma</p>
                 ) : (
-                  <div className="divide-y divide-gray-100">
+                  <div className="divide-y divide-white/5">
                     {meiTurni.map((turno) => (
                       <div key={turno.id} className="flex items-center justify-between py-3 gap-3">
                         <div className="flex items-center gap-3 min-w-0">
-                          <div className="text-center shrink-0">
-                            <p className="text-xs text-gray-400 font-medium uppercase">
+                          <div className="text-center shrink-0 w-12">
+                            <p className="text-[10px] text-muted-foreground font-semibold uppercase">
                               {new Date(turno.data + "T00:00:00").toLocaleDateString("it-IT", { weekday: "short" })}
                             </p>
-                            <p className="text-sm font-bold text-gray-900">
+                            <p className="text-sm font-bold text-foreground">
                               {new Date(turno.data + "T00:00:00").toLocaleDateString("it-IT", { day: "numeric", month: "short" })}
                             </p>
                           </div>
                           <ShiftBadge type={turno.tipo} />
                           {turno.ore > 0 && (
-                            <span className="text-xs text-gray-400">{turno.ore}h</span>
+                            <span className="text-xs text-muted-foreground">{turno.ore}h</span>
                           )}
                         </div>
                         <Button
                           size="sm"
                           variant="outline"
-                          className="shrink-0 text-xs gap-1.5"
+                          className="shrink-0 text-xs gap-1.5 border-white/10 hover:border-amber-500/50 hover:text-amber-400 hover:bg-amber-500/10"
                           onClick={() => openSwap(turno)}
                           data-testid={`swap-btn-${turno.id}`}
                         >
@@ -212,35 +207,32 @@ export default function Dashboard() {
             </Card>
           </div>
 
-          {/* Staff ranking */}
+          {/* Staff table */}
           <div className="lg:col-span-2">
-            <Card className="shadow-sm">
+            <Card className="glass border-white/8 shadow-none">
               <CardHeader className="pb-3">
-                <CardTitle className="text-base font-semibold">Staff — Ore</CardTitle>
+                <CardTitle className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Staff — Ore</CardTitle>
               </CardHeader>
               <CardContent className="p-0">
                 <Table>
                   <TableHeader>
-                    <TableRow>
-                      <TableHead className="pl-6">Nome</TableHead>
-                      <TableHead>Ruolo</TableHead>
-                      <TableHead className="text-right pr-6">Ore</TableHead>
+                    <TableRow className="border-white/5 hover:bg-transparent">
+                      <TableHead className="pl-6 text-muted-foreground text-xs">Nome</TableHead>
+                      <TableHead className="text-muted-foreground text-xs">Ruolo</TableHead>
+                      <TableHead className="text-right pr-6 text-muted-foreground text-xs">Ore</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {stats
-                      .slice()
-                      .sort((a, b) => b.ore_totali - a.ore_totali)
-                      .map((dip) => (
-                        <TableRow key={dip.id} className={dip.id === user?.id ? `${theme.bg}` : ""}>
-                          <TableCell className="pl-6 font-medium flex items-center gap-2">
-                            {dip.id === user?.id && <User className="h-3.5 w-3.5 text-gray-400" />}
-                            {dip.nome}
-                          </TableCell>
-                          <TableCell><RoleBadge role={dip.ruolo} /></TableCell>
-                          <TableCell className="text-right pr-6 font-mono text-sm">{dip.ore_totali}</TableCell>
-                        </TableRow>
-                      ))}
+                    {stats.slice().sort((a, b) => b.ore_totali - a.ore_totali).map((dip) => (
+                      <TableRow key={dip.id} className={`border-white/5 ${dip.id === user?.id ? theme.bg : "hover:bg-white/3"}`}>
+                        <TableCell className="pl-6 font-medium text-foreground flex items-center gap-2">
+                          {dip.id === user?.id && <User className="h-3.5 w-3.5 text-muted-foreground" />}
+                          {dip.nome}
+                        </TableCell>
+                        <TableCell><RoleBadge role={dip.ruolo} /></TableCell>
+                        <TableCell className="text-right pr-6 font-mono text-sm text-gold font-bold">{dip.ore_totali}</TableCell>
+                      </TableRow>
+                    ))}
                   </TableBody>
                 </Table>
               </CardContent>
@@ -249,97 +241,88 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* Swap Request Dialog */}
+      {/* Swap Dialog */}
       <Dialog open={swapOpen} onOpenChange={setSwapOpen}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-w-md glass-strong border-white/10">
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <ArrowLeftRight className="h-5 w-5 text-primary" />
+            <DialogTitle className="flex items-center gap-2 text-foreground">
+              <ArrowLeftRight className="h-5 w-5 text-amber-400" />
               Richiedi Scambio Turno
             </DialogTitle>
           </DialogHeader>
 
           <div className="space-y-5">
-            {/* Turno ceduto (pre-selected, read-only) */}
-            <div className="rounded-xl border bg-gray-50 p-4">
-              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Il tuo turno da cedere</p>
+            <div className="rounded-xl bg-white/5 border border-white/10 p-4">
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Turno da cedere</p>
               {swapTurno && (
                 <div className="flex items-center gap-3">
                   <ShiftBadge type={swapTurno.tipo} />
-                  <span className="font-medium text-gray-800">
+                  <span className="font-medium text-foreground">
                     {new Date(swapTurno.data + "T00:00:00").toLocaleDateString("it-IT", { weekday: "long", day: "numeric", month: "long" })}
                   </span>
                 </div>
               )}
             </div>
 
-            {/* Choose colleague */}
             <div className="space-y-2">
-              <Label>Collega con cui scambiare</Label>
+              <Label className="text-muted-foreground">Collega con cui scambiare</Label>
               <Select value={colleagueId} onValueChange={(v) => { setColleagueId(v); setColleagueTurnoId(""); }}>
-                <SelectTrigger data-testid="select-colleague">
+                <SelectTrigger className="border-white/10 bg-white/5" data-testid="select-colleague">
                   <SelectValue placeholder="Seleziona un collega..." />
                 </SelectTrigger>
                 <SelectContent>
-                  {dipendenti
-                    .filter((d) => d.id !== user?.id)
-                    .map((d) => (
-                      <SelectItem key={d.id} value={d.id.toString()}>
-                        {d.nome} — {d.ruolo}
-                      </SelectItem>
-                    ))}
+                  {dipendenti.filter((d) => d.id !== user?.id).map((d) => (
+                    <SelectItem key={d.id} value={d.id.toString()}>{d.nome} — {d.ruolo}</SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
 
-            {/* Choose colleague's shift (optional) */}
             {colleagueId && (
               <div className="space-y-2">
-                <Label>Turno del collega da ricevere <span className="text-gray-400 font-normal">(opzionale)</span></Label>
+                <Label className="text-muted-foreground">Turno del collega <span className="text-muted-foreground/60 font-normal">(opzionale)</span></Label>
                 <Select value={colleagueTurnoId} onValueChange={setColleagueTurnoId}>
-                  <SelectTrigger data-testid="select-colleague-shift">
+                  <SelectTrigger className="border-white/10 bg-white/5" data-testid="select-colleague-shift">
                     <SelectValue placeholder="Nessuna preferenza" />
                   </SelectTrigger>
                   <SelectContent>
-                    {colleagueTurni.length === 0 ? (
-                      <SelectItem value="__none" disabled>Nessun turno disponibile</SelectItem>
-                    ) : (
-                      colleagueTurni.map((t) => (
-                        <SelectItem key={t.id} value={t.id.toString()}>
-                          {t.data} — {t.tipo}
-                        </SelectItem>
+                    {colleagueTurni.length === 0
+                      ? <SelectItem value="__none" disabled>Nessun turno disponibile</SelectItem>
+                      : colleagueTurni.map((t) => (
+                        <SelectItem key={t.id} value={t.id.toString()}>{t.data} — {t.tipo}</SelectItem>
                       ))
-                    )}
+                    }
                   </SelectContent>
                 </Select>
               </div>
             )}
 
-            {/* Note */}
             <div className="space-y-2">
-              <Label>Motivazione <span className="text-gray-400 font-normal">(opzionale)</span></Label>
+              <Label className="text-muted-foreground">Motivazione <span className="text-muted-foreground/60 font-normal">(opzionale)</span></Label>
               <Textarea
-                placeholder="Es. Motivi famigliari, impegno personale..."
+                placeholder="Es. Motivi famigliari..."
                 value={swapNota}
                 onChange={(e) => setSwapNota(e.target.value)}
                 rows={3}
+                className="border-white/10 bg-white/5 resize-none"
                 data-testid="swap-note"
               />
             </div>
 
             <div className="flex gap-3 pt-1">
-              <Button variant="outline" className="flex-1" onClick={() => setSwapOpen(false)}>
+              <Button variant="outline" className="flex-1 border-white/10 hover:bg-white/5" onClick={() => setSwapOpen(false)}>
                 Annulla
               </Button>
-              <Button
-                className="flex-1 gap-2"
+              <button
                 onClick={submitSwap}
                 disabled={swapLoading || !colleagueId}
                 data-testid="submit-swap"
+                className="flex-1 rounded-lg font-bold text-sm gap-2 flex items-center justify-center transition-all disabled:opacity-50 glow-gold py-2"
+                style={{ background: "linear-gradient(135deg, #f59e0b, #d97706)", color: "#0f172a" }}
               >
                 <ArrowLeftRight className="h-4 w-4" />
                 {swapLoading ? "Invio..." : "Invia Richiesta"}
-              </Button>
+              </button>
             </div>
           </div>
         </DialogContent>

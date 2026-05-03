@@ -431,6 +431,11 @@ def annulla_scambio(id):
     return jsonify({'success': True})
 
 
+@api.route('/api/manifest.json', methods=['GET'])
+def manifest():
+    return send_file(os.path.join(BASE_DIR, 'manifest.json'), mimetype='application/manifest+json')
+
+
 @api.route('/api/genera_report_mensile', methods=['GET'])
 def genera_pdf():
     mese = request.args.get('mese', str(datetime.now().month))

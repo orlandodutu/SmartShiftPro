@@ -1,0 +1,125 @@
+html
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <link rel="manifest" href="/manifest.json">
+    <title>SmartShift Pro</title>
+    <style>
+        :root {
+            --primary: #f59e0b;
+            --bg: #0f172a;
+            --glass: rgba(255, 255, 255, 0.03);
+            --border: rgba(255, 255, 255, 0.1);
+        }
+        body { 
+            margin: 0; font-family: 'Inter', -apple-system, sans-serif; 
+            background: radial-gradient(circle at top right, #1e1b4b, #0f172a);
+            color: #f8fafc; min-height: 100vh;
+        }
+        .login-card {
+            background: var(--glass); backdrop-filter: blur(10px);
+            border: 1px solid var(--border); padding: 40px;
+            border-radius: 24px; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.5);
+            width: 320px; text-align: center;
+        }
+        .smart-input {
+            width: 100%; padding: 14px; margin: 10px 0;
+            background: rgba(0,0,0,0.2); border: 1px solid var(--border);
+            border-radius: 12px; color: white; outline: none;
+            transition: 0.3s; box-sizing: border-box;
+        }
+        .smart-input:focus { border-color: var(--primary); }
+        .btn-gold {
+            background: linear-gradient(135deg, #f59e0b, #d97706);
+            color: #1e1b4b; border: none; padding: 14px;
+            width: 100%; border-radius: 12px; font-weight: 800;
+            text-transform: uppercase; cursor: pointer; letter-spacing: 1px;
+        }
+        /* Dashboard Elegante */
+        .header-pro {
+            padding: 20px; display: flex; justify-content: space-between;
+            align-items: center; background: rgba(15, 23, 42, 0.8);
+            backdrop-filter: blur(10px); sticky; top: 0; z-index: 100;
+        }
+        .stat-box {
+            background: var(--glass); border: 1px solid var(--border);
+            padding: 20px; border-radius: 20px; text-align: center;
+        }
+        .stat-val { font-size: 24px; font-weight: 800; color: var(--primary); }
+        .staff-row {
+            display: flex; justify-content: space-between; padding: 15px;
+            border-bottom: 1px solid var(--border); align-items: center;
+        }
+        .status-dot { width: 100px; padding: 4px; border-radius: 20px; font-size: 11px; text-align: center; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <div id="login-zone" style="display: flex; justify-content: center; align-items: center; height: 100vh;">
+        <div class="login-card">
+            <h1 style="margin: 0; letter-spacing: -1px;">Smart<span style="color: var(--primary)">Shift</span></h1>
+            <p style="opacity: 0.5; font-size: 14px; margin-bottom: 30px;">PRO MANAGEMENT SYSTEM</p>
+            <input type="text" id="user" class="smart-input" placeholder="Username">
+            <input type="password" id="pass" class="smart-input" placeholder="Password" value="password123">
+            <button class="btn-gold" onclick="login()">Accedi</button>
+        </div>
+    </div>
+
+    <div id="dash-zone" style="display: none;">
+        <div class="header-pro">
+            <div style="font-weight: 900; font-size: 20px;">S<span style="color: var(--primary)">S</span>.PRO</div>
+            <button onclick="window.open('/api/genera_report_mensile?mese=Maggio')" style="background:none; border: 1px solid var(--primary); color: var(--primary); padding: 8px 15px; border-radius: 10px; font-weight: bold;">PDF</button>
+        </div>
+        
+        <div style="padding: 20px;">
+            <div class="stats-grid" style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px;">
+                <div class="stat-box"><div class="stat-val">160h</div><div style="font-size: 10px; opacity: 0.6;">ORE</div></div>
+                <div class="stat-box"><div class="stat-val">4</div><div style="font-size: 10px; opacity: 0.6;">NOTTI</div></div>
+                <div class="stat-box"><div class="stat-val">22</div><div style="font-size: 10px; opacity: 0.6;">FERIE</div></div>
+            </div>
+
+            <h3 style="margin-top: 30px; font-size: 16px; text-transform: uppercase; opacity: 0.5;">Monitoraggio Staff</h3>
+            <div id="staff-list" style="background: var(--glass); border-radius: 20px; border: 1px solid var(--border); overflow: hidden;">
+                <!-- I nomi (Elena, Roberto, ecc.) appariranno qui -->
+            </div>
+        </div>
+    </div>
+
+    <script>
+        async function login() {
+            const u = document.getElementById('user').value;
+            const p = document.getElementById('pass').value;
+            const res = await fetch('/api/login', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({username: u, password: p})
+            });
+            if(res.ok) {
+                document.getElementById('login-zone').style.display = 'none';
+                document.getElementById('dash-zone').style.display = 'block';
+                caricaStaff();
+            } else { alert("Accesso Negato"); }
+        }
+
+        function caricaStaff() {
+            const staff = [
+                {n: "Elena", r: "OSS", s: "Malattia", c: "#ef4444"},
+                {n: "Roberto", r: "OSS", s: "In Turno", c: "#10b981"},
+                {n: "Anna", r: "Inf.", s: "In Turno", c: "#10b981"},
+                {n: "Fabiana", r: "PUL", s: "Riposo", c: "#3b82f6"}
+            ];
+            const container = document.getElementById('staff-list');
+            container.innerHTML = staff.map(d => `
+                <div class="staff-row">
+                    <div>
+                        <div style="font-weight: bold;">${d.n}</div>
+                        <div style="font-size: 10px; opacity: 0.5;">${d.r}</div>
+                    </div>
+                    <div class="status-dot" style="background: ${d.c}22; color: ${d.c}; border: 1px solid ${d.c}">${d.s}</div>
+                </div>
+            `).join('');
+        }
+    </script>
+</body>
+</html>

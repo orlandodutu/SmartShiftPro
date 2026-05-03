@@ -2,14 +2,16 @@ import { useEffect, useState } from "react";
 import { RichiestaScambio, Turno, Dipendente } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { ShiftBadge } from "@/components/ui/ShiftBadge";
+import { RoleBadge } from "@/components/ui/RoleBadge";
+import { Plus, ArrowLeftRight, Clock } from "lucide-react";
 
 export default function Scambi() {
   const { user } = useAuth();
@@ -24,7 +26,7 @@ export default function Scambi() {
     destinatario_id: "",
     turno_richiedente_id: "",
     turno_destinatario_id: "",
-    nota: ""
+    nota: "",
   });
 
   const fetchData = async () => {
@@ -33,21 +35,17 @@ export default function Scambi() {
       const [scambiRes, dipRes, turniRes] = await Promise.all([
         fetch(`/flask-api/api/scambi?richiedente_id=${user.id}`, { credentials: "include" }),
         fetch("/flask-api/api/dipendenti", { credentials: "include" }),
-        fetch(`/flask-api/api/turni?dipendente_id=${user.id}`, { credentials: "include" })
+        fetch(`/flask-api/api/turni?dipendente_id=${user.id}`, { credentials: "include" }),
       ]);
       if (scambiRes.ok) setScambi(await scambiRes.json());
       if (dipRes.ok) setDipendenti(await dipRes.json());
       if (turniRes.ok) setMieTurni(await turniRes.json());
-    } catch (error) {
-      console.error(error);
     } finally {
       setLoading(false);
     }
   };
 
-  useEffect(() => {
-    fetchData();
-  }, [user]);
+  useEffect(() => { fetchData(); }, [user]);
 
   const handleRequest = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -55,110 +53,142 @@ export default function Scambi() {
       toast({ title: "Compila i campi obbligatori", variant: "destructive" });
       return;
     }
-    
-    try {
-      const res = await fetch("/flask-api/api/scambi", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          richiedente_id: user?.id,
-          destinatario_id: parseInt(newScambio.destinatario_id),
-          turno_richiedente_id: parseInt(newScambio.turno_richiedente_id),
-          turno_destinatario_id: newScambio.turno_destinatario_id ? parseInt(newScambio.turno_destinatario_id) : null,
-          nota: newScambio.nota
-        }),
-        credentials: "include"
-      });
-      if (res.ok) {
-        toast({ title: "Richiesta inviata" });
-        setIsDialogOpen(false);
-        fetchData();
-      }
-    } catch (error) {
+    const res = await fetch("/flask-api/api/scambi", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        richiedente_id: user?.id,
+        destinatario_id: parseInt(newScambio.destinatario_id),
+        turno_richiedente_id: parseInt(newScambio.turno_richiedente_id),
+        turno_destinatario_id: newScambio.turno_destinatario_id ? parseInt(newScambio.turno_destinatario_id) : null,
+        nota: newScambio.nota,
+      }),
+      credentials: "include",
+    });
+    if (res.ok) {
+      toast({ title: "Richiesta inviata" });
+      setIsDialogOpen(false);
+      fetchData();
+    } else {
       toast({ title: "Errore", variant: "destructive" });
     }
   };
 
-  const getStatusBadge = (stato: string) => {
-    switch(stato) {
-      case 'IN_ATTESA': return <Badge variant="outline" className="bg-yellow-50 text-yellow-700 border-yellow-200">In Attesa</Badge>;
-      case 'APPROVATA': return <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200">Approvata</Badge>;
-      case 'RIFIUTATA': return <Badge variant="outline" className="bg-red-50 text-red-700 border-red-200">Rifiutata</Badge>;
-      default: return <Badge variant="outline">{stato}</Badge>;
+  const statusBadge = (stato: string) => {
+    switch (stato) {
+      case "IN_ATTESA":  return <Badge variant="outline" className="bg-amber-500/10 text-amber-400 border-amber-500/30">In Attesa</Badge>;
+      case "APPROVATA":  return <Badge variant="outline" className="bg-emerald-500/10 text-emerald-400 border-emerald-500/30">Approvata</Badge>;
+      case "RIFIUTATA":  return <Badge variant="outline" className="bg-red-500/10 text-red-400 border-red-500/30">Rifiutata</Badge>;
+      default:           return <Badge variant="outline">{stato}</Badge>;
     }
   };
 
   return (
-    <div className="p-6 md:p-8 max-w-5xl mx-auto space-y-6">
+    <div className="p-6 md:p-10 max-w-5xl mx-auto space-y-6">
       <div className="flex justify-between items-center">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight text-gray-900">Le mie Richieste di Scambio</h1>
-          <p className="text-gray-500 mt-1">Gestisci i cambi turno con i colleghi</p>
+          <h1 className="text-2xl font-bold text-foreground tracking-tight">Le mie Richieste di Scambio</h1>
+          <p className="text-sm text-muted-foreground mt-0.5">Gestisci i cambi turno con i colleghi</p>
         </div>
-        
+
         <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
           <DialogTrigger asChild>
-            <Button>Nuova Richiesta</Button>
+            <button
+              className="flex items-center gap-2 px-4 py-2 rounded-lg font-semibold text-sm glow-gold"
+              style={{ background: "linear-gradient(135deg, #f59e0b, #d97706)", color: "#0f172a" }}
+              data-testid="btn-new-scambio"
+            >
+              <Plus className="h-4 w-4" />
+              Nuova Richiesta
+            </button>
           </DialogTrigger>
-          <DialogContent>
+          <DialogContent className="glass-strong border-white/10 max-w-md">
             <DialogHeader>
-              <DialogTitle>Richiedi Cambio Turno</DialogTitle>
+              <DialogTitle className="flex items-center gap-2 text-foreground">
+                <ArrowLeftRight className="h-5 w-5 text-amber-400" />
+                Richiedi Cambio Turno
+              </DialogTitle>
             </DialogHeader>
             <form onSubmit={handleRequest} className="space-y-4">
               <div className="space-y-2">
-                <Label>Il tuo turno da cedere</Label>
-                <Select value={newScambio.turno_richiedente_id} onValueChange={v => setNewScambio({...newScambio, turno_richiedente_id: v})}>
-                  <SelectTrigger><SelectValue placeholder="Seleziona..." /></SelectTrigger>
+                <Label className="text-muted-foreground">Il tuo turno da cedere</Label>
+                <Select value={newScambio.turno_richiedente_id} onValueChange={(v) => setNewScambio({ ...newScambio, turno_richiedente_id: v })}>
+                  <SelectTrigger className="border-white/10 bg-white/5"><SelectValue placeholder="Seleziona..." /></SelectTrigger>
                   <SelectContent>
-                    {mieiTurni.map(t => (
-                      <SelectItem key={t.id} value={t.id.toString()}>{t.data} - {t.tipo}</SelectItem>
+                    {mieiTurni.map((t) => (
+                      <SelectItem key={t.id} value={t.id.toString()}>{t.data} — {t.tipo}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
               </div>
               <div className="space-y-2">
-                <Label>Collega con cui scambiare</Label>
-                <Select value={newScambio.destinatario_id} onValueChange={v => setNewScambio({...newScambio, destinatario_id: v})}>
-                  <SelectTrigger><SelectValue placeholder="Seleziona..." /></SelectTrigger>
+                <Label className="text-muted-foreground">Collega con cui scambiare</Label>
+                <Select value={newScambio.destinatario_id} onValueChange={(v) => setNewScambio({ ...newScambio, destinatario_id: v })}>
+                  <SelectTrigger className="border-white/10 bg-white/5"><SelectValue placeholder="Seleziona..." /></SelectTrigger>
                   <SelectContent>
-                    {dipendenti.filter(d => d.id !== user?.id).map(d => (
-                      <SelectItem key={d.id} value={d.id.toString()}>{d.nome} - {d.ruolo}</SelectItem>
+                    {dipendenti.filter((d) => d.id !== user?.id).map((d) => (
+                      <SelectItem key={d.id} value={d.id.toString()}>{d.nome} — {d.ruolo}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
               </div>
               <div className="space-y-2">
-                <Label>Note / Motivo (opzionale)</Label>
-                <Textarea value={newScambio.nota} onChange={e => setNewScambio({...newScambio, nota: e.target.value})} />
+                <Label className="text-muted-foreground">Note / Motivo <span className="text-muted-foreground/50 font-normal">(opzionale)</span></Label>
+                <Textarea
+                  value={newScambio.nota}
+                  onChange={(e) => setNewScambio({ ...newScambio, nota: e.target.value })}
+                  className="border-white/10 bg-white/5 resize-none"
+                  rows={3}
+                />
               </div>
-              <Button type="submit" className="w-full">Invia Richiesta</Button>
+              <button
+                type="submit"
+                className="w-full py-2.5 rounded-lg font-bold text-sm glow-gold"
+                style={{ background: "linear-gradient(135deg, #f59e0b, #d97706)", color: "#0f172a" }}
+              >
+                Invia Richiesta
+              </button>
             </form>
           </DialogContent>
         </Dialog>
       </div>
 
-      <div className="space-y-4">
+      <div className="space-y-3">
         {loading ? (
-          <p>Caricamento...</p>
+          <p className="text-sm text-muted-foreground text-center py-10">Caricamento...</p>
         ) : scambi.length === 0 ? (
-          <Card className="border-dashed border-2 bg-gray-50"><CardContent className="p-8 text-center text-gray-500">Nessuna richiesta effettuata</CardContent></Card>
+          <div className="glass rounded-2xl p-10 text-center border border-white/8">
+            <ArrowLeftRight className="h-8 w-8 text-muted-foreground/30 mx-auto mb-3" />
+            <p className="text-muted-foreground font-medium">Nessuna richiesta effettuata</p>
+          </div>
         ) : (
-          scambi.map(s => (
-            <Card key={s.id}>
-              <CardContent className="p-4 sm:p-6 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-                <div>
-                  <div className="flex items-center gap-2 mb-2">
-                    <span className="font-semibold text-gray-900">Verso: {s.destinatario_nome}</span>
-                    {getStatusBadge(s.stato)}
+          scambi.map((s) => (
+            <Card key={s.id} className="glass border-white/8 shadow-none">
+              <CardContent className="p-5 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                <div className="space-y-2 flex-1">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-semibold text-foreground">Verso:</span>
+                    <span className="font-bold text-foreground">{s.destinatario_nome}</span>
+                    <RoleBadge role={s.destinatario_ruolo} />
+                    {statusBadge(s.stato)}
                   </div>
-                  <p className="text-sm text-gray-600">
-                    <strong>Cedi:</strong> {s.turno_richiedente ? `${s.turno_richiedente.data} ${s.turno_richiedente.tipo}` : 'N/D'}
-                  </p>
-                  {s.nota && <p className="text-sm text-gray-500 italic mt-1">"{s.nota}"</p>}
-                  {s.nota_caposala && <p className="text-sm text-red-600 mt-1 font-medium">Nota Caposala: {s.nota_caposala}</p>}
+                  {s.turno_richiedente && (
+                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                      <span>Cedi:</span>
+                      <ShiftBadge type={s.turno_richiedente.tipo} />
+                      <span className="font-mono">{s.turno_richiedente.data}</span>
+                    </div>
+                  )}
+                  {s.nota && (
+                    <p className="text-sm text-muted-foreground italic">"{s.nota}"</p>
+                  )}
+                  {s.nota_caposala && (
+                    <p className="text-sm text-amber-400 font-medium">Nota Caposala: {s.nota_caposala}</p>
+                  )}
                 </div>
-                <div className="text-right text-xs text-gray-400">
-                  Richiesta del {new Date(s.creata_il).toLocaleDateString('it-IT')}
+                <div className="flex items-center gap-1.5 text-xs text-muted-foreground/60 shrink-0">
+                  <Clock className="h-3 w-3" />
+                  {new Date(s.creata_il).toLocaleDateString("it-IT")}
                 </div>
               </CardContent>
             </Card>
