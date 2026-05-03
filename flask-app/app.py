@@ -335,6 +335,11 @@ def genera_turni():
     return jsonify({'success': True, 'generati': generati, 'saltati': saltati, 'modalita': modalita, 'giorni': giorni})
 
 
+@api.route('/api/genera_programmazione', methods=['POST'])
+def genera_programmazione():
+    return genera_turni()
+
+
 @api.route('/api/scambi', methods=['GET'])
 def get_scambi():
     stato = request.args.get('stato')
