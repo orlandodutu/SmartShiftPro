@@ -21,7 +21,6 @@ args = ["pnpm", "--filter", "@workspace/api-server", "run", "build"]
 NODE_ENV = "production"
 
 [services.production.run]
-# we don't run through pnpm to make startup faster in production
 args = ["node", "--enable-source-maps", "artifacts/api-server/dist/index.mjs"]
 
 [services.production.run.env]
@@ -30,3 +29,11 @@ NODE_ENV = "production"
 
 [services.production.health.startup]
 path = "/api/healthz"
+
+[[services]]
+localPort = 5000
+name = "Flask API"
+paths = ["/flask-api"]
+
+[services.development]
+run = "python /home/runner/workspace/flask-app/app.py"
