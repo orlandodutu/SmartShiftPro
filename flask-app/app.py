@@ -36,6 +36,9 @@ class Dipendente(db.Model):
     malattia = db.Column(db.Integer, default=0)
     is_admin = db.Column(db.Boolean, default=False)
     preferenze_turno = db.Column(db.String(100), default='MATTINO,POMERIGGIO,NOTTE')
+    password_changed = db.Column(db.Boolean, default=False)
+    last_login = db.Column(db.String(20), default='')
+    last_seen = db.Column(db.String(20), default='')
 
     def to_dict(self):
         return {
@@ -47,7 +50,10 @@ class Dipendente(db.Model):
             'ferie': self.ferie,
             'malattia': self.malattia,
             'is_admin': self.is_admin,
-            'preferenze_turno': (self.preferenze_turno or 'MATTINO,POMERIGGIO,NOTTE').split(',')
+            'preferenze_turno': (self.preferenze_turno or 'MATTINO,POMERIGGIO,NOTTE').split(','),
+            'password_changed': bool(self.password_changed),
+            'last_login': self.last_login or '',
+            'last_seen': self.last_seen or '',
         }
 
 
@@ -112,9 +118,9 @@ class RichiestaScambio(db.Model):
 def inizializza_staff():
     staff_nomi = [
         ("Orlando", "DEV", True),
-        ("Fabiana", "PULIZIE", False),
-        ("Marina", "PULIZIE", False),
-        ("Angela", "PULIZIE", False),
+        ("Fabiana", "AUSILIARIO", False),
+        ("Marina", "AUSILIARIO", False),
+        ("Angela", "AUSILIARIO", False),
         ("Carmen", "OSS", False),
         ("Roberto", "OSS", False),
         ("Barbara", "OSS", False),
@@ -149,26 +155,34 @@ def inizializza_staff():
 @api.route('/api/login', methods=['POST'])
 def login():
     data = request.json
-    user = Dipendente.query.filter_by(
-        nome=data.get('username'),
-        password=data.get('password')
-    ).first()
+    username = str(data.get('username', ''))[:50]
+    password = str(data.get('password', ''))[:100]
+    user = Dipendente.query.filter_by(nome=username, password=password).first()
     if user:
         session['user_id'] = user.id
-        return jsonify({
-            'success': True,
-            'id': user.id,
-            'nome': user.nome,
-            'ruolo': user.ruolo,
-            'is_admin': user.is_admin,
-            'stats': {
-                'ore': user.ore_totali,
-                'notti': user.notti_fatte,
-                'ferie': user.ferie,
-                'malattia': user.malattia
-            }
-        })
+        now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        user.last_login = now
+        user.last_seen = now
+        db.session.commit()
+        return jsonify(user.to_dict() | {'success': True})
     return jsonify({'errore': 'Credenziali errate'}), 401
+
+
+@api.route('/api/change_password', methods=['POST'])
+def change_password():
+    if 'user_id' not in session:
+        return jsonify({'errore': 'Non autenticato'}), 401
+    user = db.session.get(Dipendente, session['user_id'])
+    if not user:
+        return jsonify({'errore': 'Utente non trovato'}), 404
+    data = request.json
+    new_pw = str(data.get('new_password', ''))[:100].strip()
+    if len(new_pw) < 6:
+        return jsonify({'errore': 'La password deve essere di almeno 6 caratteri'}), 400
+    user.password = new_pw
+    user.password_changed = True
+    db.session.commit()
+    return jsonify(user.to_dict())
 
 
 @api.route('/api/logout', methods=['POST'])
@@ -181,10 +195,23 @@ def logout():
 def me():
     if 'user_id' not in session:
         return jsonify({'errore': 'Non autenticato'}), 401
-    user = Dipendente.query.get(session['user_id'])
+    user = db.session.get(Dipendente, session['user_id'])
     if not user:
         return jsonify({'errore': 'Utente non trovato'}), 404
+    user.last_seen = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    db.session.commit()
     return jsonify(user.to_dict())
+
+
+@api.route('/api/online', methods=['GET'])
+def get_online():
+    if 'user_id' not in session:
+        return jsonify({'errore': 'Non autenticato'}), 401
+    me = db.session.get(Dipendente, session['user_id'])
+    if not me or not me.is_admin:
+        return jsonify({'errore': 'Non autorizzato'}), 403
+    utenti = Dipendente.query.order_by(Dipendente.last_seen.desc()).all()
+    return jsonify([u.to_dict() for u in utenti])
 
 
 @api.route('/api/dipendenti', methods=['GET'])
@@ -268,6 +295,37 @@ def aggiungi_turno():
     return jsonify(turno.to_dict()), 201
 
 
+@api.route('/api/turni/<int:id>', methods=['PUT'])
+def modifica_turno(id):
+    if 'user_id' not in session:
+        return jsonify({'errore': 'Non autenticato'}), 401
+    richiedente = db.session.get(Dipendente, session['user_id'])
+    if not richiedente or not richiedente.is_admin:
+        return jsonify({'errore': 'Non autorizzato — solo admin'}), 403
+    turno = db.session.get(Turno, id)
+    if not turno:
+        return jsonify({'errore': 'Turno non trovato'}), 404
+    data = request.json
+    old_dip_id = turno.dipendente_id
+    ore_map = {'MATTINO': 7, 'POMERIGGIO': 7, 'NOTTE': 10, 'FERIE': 0, 'MALATTIA': 0, 'RIPOSO': 0}
+    if 'dipendente_id' in data:
+        turno.dipendente_id = int(data['dipendente_id'])
+    if 'tipo' in data:
+        turno.tipo = str(data['tipo'])
+        turno.ore = ore_map.get(turno.tipo, 8)
+    if 'data' in data:
+        turno.data = str(data['data'])[:10]
+    if 'note' in data:
+        turno.note = str(data['note'])[:200]
+    if 'ore' in data:
+        turno.ore = int(data['ore'])
+    db.session.commit()
+    _ricalcola_statistiche(old_dip_id)
+    if turno.dipendente_id != old_dip_id:
+        _ricalcola_statistiche(turno.dipendente_id)
+    return jsonify(turno.to_dict())
+
+
 @api.route('/api/turni/<int:id>', methods=['DELETE'])
 def elimina_turno(id):
     turno = Turno.query.get_or_404(id)
@@ -303,8 +361,9 @@ def genera_turni():
         data_inizio = date.today()
 
     giorni = 7 if modalita == 'settimana' else 30
+    NOTTE_OSS_NOMI = {'carmen', 'elena', 'barbara', 'roberto'}
     dipendenti = Dipendente.query.filter(
-        Dipendente.ruolo.in_(['OSS', 'INFERMIERA', 'PULIZIE'])
+        Dipendente.ruolo.in_(['OSS', 'INFERMIERA', 'AUSILIARIO'])
     ).all()
 
     if not dipendenti:
@@ -324,6 +383,12 @@ def genera_turni():
                 saltati += 1
                 continue
             prefs = (dip.preferenze_turno or 'MATTINO,POMERIGGIO,NOTTE').split(',')
+            # Ausiliario: never nights
+            if dip.ruolo == 'AUSILIARIO':
+                prefs = [p for p in prefs if p != 'NOTTE']
+            # OSS: only specific staff can do nights
+            elif dip.ruolo == 'OSS' and dip.nome.lower() not in NOTTE_OSS_NOMI:
+                prefs = [p for p in prefs if p != 'NOTTE']
             tipi_disponibili = [t for t in ['MATTINO', 'POMERIGGIO', 'NOTTE'] if t in prefs]
             if not tipi_disponibili:
                 tipi_disponibili = ['MATTINO']
@@ -686,17 +751,23 @@ def legacy_genera_pdf():
 if __name__ == '__main__':
     with app.app_context():
         db.create_all()
-        # Migration: add preferenze_turno column to existing databases
+        # Migrations for new columns and data
         from sqlalchemy import text, inspect as sa_inspect
         try:
             inspector = sa_inspect(db.engine)
             cols = [c['name'] for c in inspector.get_columns('dipendente')]
-            if 'preferenze_turno' not in cols:
-                with db.engine.connect() as conn:
-                    conn.execute(text(
-                        "ALTER TABLE dipendente ADD COLUMN preferenze_turno VARCHAR(100) DEFAULT 'MATTINO,POMERIGGIO,NOTTE'"
-                    ))
-                    conn.commit()
+            with db.engine.connect() as conn:
+                for col, coldef in [
+                    ('preferenze_turno', "VARCHAR(100) DEFAULT 'MATTINO,POMERIGGIO,NOTTE'"),
+                    ('password_changed', 'BOOLEAN DEFAULT 0'),
+                    ('last_login', "VARCHAR(20) DEFAULT ''"),
+                    ('last_seen', "VARCHAR(20) DEFAULT ''"),
+                ]:
+                    if col not in cols:
+                        conn.execute(text(f"ALTER TABLE dipendente ADD COLUMN {col} {coldef}"))
+                # Rename PULIZIE → AUSILIARIO
+                conn.execute(text("UPDATE dipendente SET ruolo='AUSILIARIO' WHERE ruolo='PULIZIE'"))
+                conn.commit()
         except Exception:
             pass
         inizializza_staff()

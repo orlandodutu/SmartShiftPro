@@ -7,6 +7,7 @@ interface AuthContextType {
   isLoading: boolean;
   login: (user: Dipendente) => void;
   logout: () => void;
+  updateUser: (user: Dipendente) => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -19,37 +20,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     fetch("/flask-api/api/me", { credentials: "include" })
       .then((res) => {
-        if (res.ok) {
-          return res.json();
-        }
+        if (res.ok) return res.json();
         throw new Error("Not logged in");
       })
-      .then((data) => {
-        setUser(data);
-      })
-      .catch(() => {
-        setUser(null);
-      })
-      .finally(() => {
-        setIsLoading(false);
-      });
+      .then(setUser)
+      .catch(() => setUser(null))
+      .finally(() => setIsLoading(false));
   }, []);
 
-  const login = (user: Dipendente) => {
-    setUser(user);
+  const login = (u: Dipendente) => {
+    setUser(u);
     setLocation("/dashboard");
   };
 
   const logout = () => {
-    fetch("/flask-api/api/logout", { method: "POST", credentials: "include" })
-      .finally(() => {
-        setUser(null);
-        setLocation("/login");
-      });
+    fetch("/flask-api/api/logout", { method: "POST", credentials: "include" }).finally(() => {
+      setUser(null);
+      setLocation("/login");
+    });
   };
 
+  const updateUser = (u: Dipendente) => setUser(u);
+
   return (
-    <AuthContext.Provider value={{ user, isLoading, login, logout }}>
+    <AuthContext.Provider value={{ user, isLoading, login, logout, updateUser }}>
       {children}
     </AuthContext.Provider>
   );
@@ -57,8 +51,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
 export function useAuth() {
   const context = useContext(AuthContext);
-  if (context === undefined) {
-    throw new Error("useAuth must be used within an AuthProvider");
-  }
+  if (context === undefined) throw new Error("useAuth must be used within an AuthProvider");
   return context;
 }

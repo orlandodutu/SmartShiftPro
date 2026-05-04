@@ -1,7 +1,7 @@
 import { ReactNode } from "react";
 import { Link, useLocation } from "wouter";
 import { useAuth } from "@/contexts/AuthContext";
-import { CalendarDays, LayoutDashboard, Shuffle, Wand2, LogOut, ShieldAlert } from "lucide-react";
+import { CalendarDays, LayoutDashboard, Shuffle, Wand2, LogOut, ShieldAlert, Activity } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { RoleBadge } from "@/components/ui/RoleBadge";
 import type { Ruolo } from "@/lib/api";
@@ -9,7 +9,7 @@ import type { Ruolo } from "@/lib/api";
 const ROLE_AVATAR: Record<Ruolo, string> = {
   OSS:        "bg-blue-900/60 text-blue-300",
   INFERMIERA: "bg-emerald-900/60 text-emerald-300",
-  PULIZIE:    "bg-amber-900/60 text-amber-300",
+  AUSILIARIO: "bg-amber-900/60 text-amber-300",
   DEV:        "bg-indigo-900/60 text-indigo-300",
   CAPOSALA:   "bg-yellow-900/60 text-yellow-300",
 };
@@ -17,7 +17,7 @@ const ROLE_AVATAR: Record<Ruolo, string> = {
 const ROLE_DOT: Record<Ruolo, string> = {
   OSS:        "bg-blue-400",
   INFERMIERA: "bg-emerald-400",
-  PULIZIE:    "bg-amber-400",
+  AUSILIARIO: "bg-amber-400",
   DEV:        "bg-indigo-400",
   CAPOSALA:   "bg-yellow-400",
 };
@@ -38,6 +38,9 @@ export function AppLayout({ children }: { children: ReactNode }) {
 
   if (user?.ruolo === "CAPOSALA") {
     navItems.push({ href: "/caposala", label: "Area Caposala", icon: ShieldAlert });
+  }
+  if (user?.is_admin) {
+    navItems.push({ href: "/monitor", label: "Monitor",       icon: Activity });
   }
 
   return (
@@ -70,20 +73,28 @@ export function AppLayout({ children }: { children: ReactNode }) {
         <nav className="flex-1 px-3 py-4 space-y-0.5">
           {navItems.map((item) => {
             const isActive = location === item.href || (item.href !== "/" && location.startsWith(item.href));
+            const isMonitor = item.href === "/monitor";
             return (
               <Link
                 key={item.href}
                 href={item.href}
                 className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all ${
                   isActive
-                    ? "bg-amber-500/15 text-amber-400 border border-amber-500/20"
+                    ? isMonitor
+                      ? "bg-indigo-500/15 text-indigo-400 border border-indigo-500/20"
+                      : "bg-amber-500/15 text-amber-400 border border-amber-500/20"
                     : "text-muted-foreground hover:text-foreground hover:bg-white/5"
                 }`}
               >
-                <item.icon className={`h-4 w-4 shrink-0 ${isActive ? "text-amber-400" : "text-muted-foreground"}`} />
+                <item.icon className={`h-4 w-4 shrink-0 ${
+                  isActive ? (isMonitor ? "text-indigo-400" : "text-amber-400") : "text-muted-foreground"
+                }`} />
                 {item.label}
                 {item.href === "/caposala" && (
                   <span className={`ml-auto h-1.5 w-1.5 rounded-full ${dotClass}`} />
+                )}
+                {isMonitor && !isActive && (
+                  <span className="ml-auto h-1.5 w-1.5 rounded-full bg-indigo-400 animate-pulse" />
                 )}
               </Link>
             );
@@ -91,10 +102,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
         </nav>
 
         {/* User section */}
-        <div
-          className="p-4 border-t"
-          style={{ borderColor: "rgba(255,255,255,0.07)" }}
-        >
+        <div className="p-4 border-t" style={{ borderColor: "rgba(255,255,255,0.07)" }}>
           <div className="flex items-center gap-3 mb-3">
             <div className={`h-9 w-9 rounded-xl ${avatarClass} flex items-center justify-center text-sm font-bold shrink-0`}>
               {user?.nome.charAt(0)}

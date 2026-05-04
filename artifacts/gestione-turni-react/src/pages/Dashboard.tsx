@@ -17,7 +17,7 @@ import type { Ruolo } from "@/lib/api";
 const ROLE_THEME: Record<Ruolo, { bg: string; border: string; accent: string; avatar: string; dot: string }> = {
   OSS:        { bg: "bg-blue-950/40",    border: "border-blue-800/50",    accent: "text-blue-300",    avatar: "bg-blue-900/60 text-blue-300",    dot: "bg-blue-400"    },
   INFERMIERA: { bg: "bg-emerald-950/40", border: "border-emerald-800/50", accent: "text-emerald-300", avatar: "bg-emerald-900/60 text-emerald-300", dot: "bg-emerald-400" },
-  PULIZIE:    { bg: "bg-amber-950/40",   border: "border-amber-800/50",   accent: "text-amber-300",   avatar: "bg-amber-900/60 text-amber-300",   dot: "bg-amber-400"   },
+  AUSILIARIO: { bg: "bg-amber-950/40",   border: "border-amber-800/50",   accent: "text-amber-300",   avatar: "bg-amber-900/60 text-amber-300",   dot: "bg-amber-400"   },
   DEV:        { bg: "bg-indigo-950/40",  border: "border-indigo-800/50",  accent: "text-indigo-300",  avatar: "bg-indigo-900/60 text-indigo-300",  dot: "bg-indigo-400"  },
   CAPOSALA:   { bg: "bg-yellow-950/40",  border: "border-yellow-800/50",  accent: "text-yellow-300",  avatar: "bg-yellow-900/60 text-yellow-300",  dot: "bg-yellow-400"  },
 };
@@ -25,9 +25,9 @@ const ROLE_THEME: Record<Ruolo, { bg: string; border: string; accent: string; av
 type Pref = "MATTINO" | "POMERIGGIO" | "NOTTE";
 
 const PREF_OPTIONS: { key: Pref; label: string; icon: typeof Sun; color: string }[] = [
-  { key: "MATTINO",   label: "Mattino",   icon: Sun,     color: "bg-amber-500/15 text-amber-300 border-amber-500/30"   },
-  { key: "POMERIGGIO",label: "Pomeriggio",icon: Sunset,  color: "bg-orange-500/15 text-orange-300 border-orange-500/30"},
-  { key: "NOTTE",     label: "Notte",     icon: BedDouble,color: "bg-indigo-500/15 text-indigo-300 border-indigo-500/30"},
+  { key: "MATTINO",    label: "Mattino",    icon: Sun,       color: "bg-amber-500/15 text-amber-300 border-amber-500/30"    },
+  { key: "POMERIGGIO", label: "Pomeriggio", icon: Sunset,    color: "bg-orange-500/15 text-orange-300 border-orange-500/30" },
+  { key: "NOTTE",      label: "Notte",      icon: BedDouble, color: "bg-indigo-500/15 text-indigo-300 border-indigo-500/30" },
 ];
 
 export default function Dashboard() {
@@ -40,18 +40,16 @@ export default function Dashboard() {
   const [stats, setStats] = useState<Dipendente[]>([]);
   const [meiTurni, setMeiTurni] = useState<Turno[]>([]);
   const [loading, setLoading] = useState(true);
+  const [dipendenti, setDipendenti] = useState<Dipendente[]>([]);
 
-  /* Swap state */
   const [swapOpen, setSwapOpen] = useState(false);
   const [swapTurno, setSwapTurno] = useState<Turno | null>(null);
-  const [dipendenti, setDipendenti] = useState<Dipendente[]>([]);
   const [colleagueId, setColleagueId] = useState("");
   const [colleagueTurni, setColleagueTurni] = useState<Turno[]>([]);
   const [colleagueTurnoId, setColleagueTurnoId] = useState("");
   const [swapNota, setSwapNota] = useState("");
   const [swapLoading, setSwapLoading] = useState(false);
 
-  /* Preference modal state */
   const [prefTarget, setPrefTarget] = useState<Dipendente | null>(null);
   const [prefSelected, setPrefSelected] = useState<Pref[]>([]);
   const [prefLoading, setPrefLoading] = useState(false);
@@ -72,13 +70,10 @@ export default function Dashboard() {
       if (turniRes.ok) {
         const all: Turno[] = await turniRes.json();
         const todayStr = today.toISOString().split("T")[0];
-        const upcoming = all.filter((t) => t.data >= todayStr).sort((a, b) => a.data.localeCompare(b.data));
-        setMeiTurni(upcoming.slice(0, 10));
+        setMeiTurni(all.filter((t) => t.data >= todayStr).sort((a, b) => a.data.localeCompare(b.data)).slice(0, 10));
       }
       if (dipRes.ok) setDipendenti(await dipRes.json());
-    } finally {
-      setLoading(false);
-    }
+    } finally { setLoading(false); }
   }, [user]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
@@ -86,102 +81,64 @@ export default function Dashboard() {
   useEffect(() => {
     if (!colleagueId) { setColleagueTurni([]); return; }
     fetch(`/flask-api/api/turni?dipendente_id=${colleagueId}&mese=${mese}&anno=${anno}`, { credentials: "include" })
-      .then((r) => r.ok ? r.json() : [])
-      .then(setColleagueTurni);
+      .then((r) => r.ok ? r.json() : []).then(setColleagueTurni);
   }, [colleagueId]);
 
   const openSwap = (turno: Turno) => {
-    setSwapTurno(turno);
-    setColleagueId("");
-    setColleagueTurnoId("");
-    setSwapNota("");
-    setSwapOpen(true);
+    setSwapTurno(turno); setColleagueId(""); setColleagueTurnoId(""); setSwapNota(""); setSwapOpen(true);
   };
 
   const submitSwap = async () => {
-    if (!swapTurno || !colleagueId) {
-      toast({ title: "Seleziona collega e turno", variant: "destructive" });
-      return;
-    }
+    if (!swapTurno || !colleagueId) { toast({ title: "Seleziona collega", variant: "destructive" }); return; }
     setSwapLoading(true);
     try {
       const res = await fetch("/flask-api/api/scambi", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({
-          richiedente_id: user?.id,
-          destinatario_id: parseInt(colleagueId),
-          turno_richiedente_id: swapTurno.id,
-          turno_destinatario_id: colleagueTurnoId ? parseInt(colleagueTurnoId) : null,
-          nota: swapNota,
-        }),
+        method: "POST", headers: { "Content-Type": "application/json" }, credentials: "include",
+        body: JSON.stringify({ richiedente_id: user?.id, destinatario_id: parseInt(colleagueId), turno_richiedente_id: swapTurno.id, turno_destinatario_id: colleagueTurnoId ? parseInt(colleagueTurnoId) : null, nota: swapNota }),
       });
-      if (res.ok) {
-        toast({ title: "Richiesta di scambio inviata" });
-        setSwapOpen(false);
-      } else {
-        const err = await res.json();
-        toast({ title: err.errore || "Errore", variant: "destructive" });
-      }
-    } finally {
-      setSwapLoading(false);
-    }
+      if (res.ok) { toast({ title: "Richiesta inviata" }); setSwapOpen(false); }
+      else { const err = await res.json(); toast({ title: err.errore || "Errore", variant: "destructive" }); }
+    } finally { setSwapLoading(false); }
   };
 
-  /* Open preference modal */
   const openPref = (dip: Dipendente) => {
     if (!canManage) return;
     setPrefTarget(dip);
     setPrefSelected((dip.preferenze_turno ?? ["MATTINO", "POMERIGGIO", "NOTTE"]) as Pref[]);
   };
 
-  const togglePref = (key: Pref) => {
-    setPrefSelected((prev) =>
-      prev.includes(key) ? prev.filter((p) => p !== key) : [...prev, key]
-    );
-  };
+  const togglePref = (key: Pref) =>
+    setPrefSelected((prev) => prev.includes(key) ? prev.filter((p) => p !== key) : [...prev, key]);
 
   const savePref = async () => {
     if (!prefTarget) return;
-    if (prefSelected.length === 0) {
-      toast({ title: "Seleziona almeno un turno", variant: "destructive" });
-      return;
-    }
+    if (prefSelected.length === 0) { toast({ title: "Seleziona almeno un turno", variant: "destructive" }); return; }
     setPrefLoading(true);
     try {
       const res = await fetch(`/flask-api/api/dipendenti/${prefTarget.id}/preferenze`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
+        method: "PUT", headers: { "Content-Type": "application/json" }, credentials: "include",
         body: JSON.stringify({ preferenze: prefSelected }),
       });
       if (res.ok) {
         const updated: Dipendente = await res.json();
-        setStats((prev) => prev.map((d) => (d.id === updated.id ? updated : d)));
-        setDipendenti((prev) => prev.map((d) => (d.id === updated.id ? updated : d)));
+        setStats((prev) => prev.map((d) => d.id === updated.id ? updated : d));
+        setDipendenti((prev) => prev.map((d) => d.id === updated.id ? updated : d));
         toast({ title: `Preferenze di ${prefTarget.nome} aggiornate` });
         setPrefTarget(null);
-      } else {
-        toast({ title: "Errore", variant: "destructive" });
-      }
-    } finally {
-      setPrefLoading(false);
-    }
+      } else toast({ title: "Errore", variant: "destructive" });
+    } finally { setPrefLoading(false); }
   };
 
   const myStats = stats.find((s) => s.id === user?.id) ?? user;
-
   const statCards = [
-    { label: "Ore Totali",  value: myStats?.ore_totali  ?? 0, icon: Clock,        color: "text-gold",        bg: "bg-amber-500/10"   },
-    { label: "Notti Fatte", value: myStats?.notti_fatte ?? 0, icon: Moon,         color: "text-slate-300",   bg: "bg-slate-500/10"   },
-    { label: "Ferie",       value: myStats?.ferie       ?? 0, icon: CalendarOff,  color: "text-emerald-400", bg: "bg-emerald-500/10" },
-    { label: "Malattia",    value: myStats?.malattia    ?? 0, icon: Pill,         color: "text-red-400",     bg: "bg-red-500/10"     },
+    { label: "Ore Totali",  value: myStats?.ore_totali  ?? 0, icon: Clock,       color: "text-gold",        bg: "bg-amber-500/10"   },
+    { label: "Notti Fatte", value: myStats?.notti_fatte ?? 0, icon: Moon,        color: "text-slate-300",   bg: "bg-slate-500/10"   },
+    { label: "Ferie",       value: myStats?.ferie       ?? 0, icon: CalendarOff, color: "text-emerald-400", bg: "bg-emerald-500/10" },
+    { label: "Malattia",    value: myStats?.malattia    ?? 0, icon: Pill,        color: "text-red-400",     bg: "bg-red-500/10"     },
   ];
 
   return (
     <div className="min-h-screen">
-      {/* Role-tinted hero */}
       <div className={`${theme.bg} border-b ${theme.border} px-6 md:px-10 py-8`}>
         <div className="max-w-7xl mx-auto flex items-center gap-5">
           <div className={`h-16 w-16 rounded-2xl ${theme.avatar} flex items-center justify-center text-2xl font-black`}>
@@ -200,13 +157,10 @@ export default function Dashboard() {
       </div>
 
       <div className="p-6 md:p-10 max-w-7xl mx-auto space-y-8">
-        {/* Stat cards */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           {statCards.map(({ label, value, icon: Icon, color, bg }) => (
             <div key={label} className="glass rounded-2xl p-5 flex items-center gap-4">
-              <div className={`p-3 ${bg} ${color} rounded-xl`}>
-                <Icon className="h-5 w-5" />
-              </div>
+              <div className={`p-3 ${bg} ${color} rounded-xl`}><Icon className="h-5 w-5" /></div>
               <div>
                 <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">{label}</p>
                 <p className={`text-2xl font-black mt-0.5 ${color}`}>{value}</p>
@@ -216,7 +170,6 @@ export default function Dashboard() {
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-5 gap-8">
-          {/* My upcoming shifts */}
           <div className="lg:col-span-3">
             <Card className="glass border-white/8 shadow-none">
               <CardHeader className="pb-3">
@@ -243,15 +196,9 @@ export default function Dashboard() {
                           <ShiftBadge type={turno.tipo} />
                           {turno.ore > 0 && <span className="text-xs text-muted-foreground">{turno.ore}h</span>}
                         </div>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="shrink-0 text-xs gap-1.5 border-white/10 hover:border-amber-500/50 hover:text-amber-400 hover:bg-amber-500/10"
-                          onClick={() => openSwap(turno)}
-                          data-testid={`swap-btn-${turno.id}`}
-                        >
+                        <Button size="sm" variant="outline" className="shrink-0 text-xs gap-1.5 border-white/10 hover:border-amber-500/50 hover:text-amber-400 hover:bg-amber-500/10" onClick={() => openSwap(turno)}>
                           <ArrowLeftRight className="h-3.5 w-3.5" />
-                          Richiedi Scambio
+                          Scambio
                         </Button>
                       </div>
                     ))}
@@ -261,17 +208,12 @@ export default function Dashboard() {
             </Card>
           </div>
 
-          {/* Staff table */}
           <div className="lg:col-span-2">
             <Card className="glass border-white/8 shadow-none">
               <CardHeader className="pb-3">
                 <CardTitle className="text-sm font-semibold text-muted-foreground uppercase tracking-wide flex items-center justify-between">
                   Staff — Ore
-                  {canManage && (
-                    <span className="text-[10px] font-normal text-muted-foreground/50 normal-case">
-                      Clicca per preferenze
-                    </span>
-                  )}
+                  {canManage && <span className="text-[10px] font-normal text-muted-foreground/50 normal-case">Clicca per preferenze</span>}
                 </CardTitle>
               </CardHeader>
               <CardContent className="p-0">
@@ -285,13 +227,7 @@ export default function Dashboard() {
                   </TableHeader>
                   <TableBody>
                     {stats.slice().sort((a, b) => b.ore_totali - a.ore_totali).map((dip) => (
-                      <TableRow
-                        key={dip.id}
-                        className={`border-white/5 transition-colors ${
-                          dip.id === user?.id ? theme.bg : "hover:bg-white/3"
-                        } ${canManage ? "cursor-pointer" : ""}`}
-                        onClick={() => canManage && openPref(dip)}
-                      >
+                      <TableRow key={dip.id} className={`border-white/5 transition-colors ${dip.id === user?.id ? theme.bg : "hover:bg-white/3"} ${canManage ? "cursor-pointer" : ""}`} onClick={() => canManage && openPref(dip)}>
                         <TableCell className="pl-6 font-medium text-foreground">
                           <div className="flex items-center gap-2">
                             {dip.id === user?.id && <User className="h-3.5 w-3.5 text-muted-foreground" />}
@@ -317,7 +253,7 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* ── Swap Dialog ── */}
+      {/* Swap Dialog */}
       <Dialog open={swapOpen} onOpenChange={setSwapOpen}>
         <DialogContent className="max-w-md glass-strong border-white/10">
           <DialogHeader>
@@ -339,9 +275,9 @@ export default function Dashboard() {
               )}
             </div>
             <div className="space-y-2">
-              <Label className="text-muted-foreground">Collega con cui scambiare</Label>
+              <Label className="text-muted-foreground">Collega</Label>
               <Select value={colleagueId} onValueChange={(v) => { setColleagueId(v); setColleagueTurnoId(""); }}>
-                <SelectTrigger className="border-white/10 bg-white/5"><SelectValue placeholder="Seleziona un collega..." /></SelectTrigger>
+                <SelectTrigger className="border-white/10 bg-white/5"><SelectValue placeholder="Seleziona..." /></SelectTrigger>
                 <SelectContent>
                   {dipendenti.filter((d) => d.id !== user?.id).map((d) => (
                     <SelectItem key={d.id} value={d.id.toString()}>{d.nome} — {d.ruolo}</SelectItem>
@@ -356,34 +292,19 @@ export default function Dashboard() {
                   <SelectTrigger className="border-white/10 bg-white/5"><SelectValue placeholder="Nessuna preferenza" /></SelectTrigger>
                   <SelectContent>
                     {colleagueTurni.length === 0
-                      ? <SelectItem value="__none" disabled>Nessun turno disponibile</SelectItem>
-                      : colleagueTurni.map((t) => (
-                        <SelectItem key={t.id} value={t.id.toString()}>{t.data} — {t.tipo}</SelectItem>
-                      ))}
+                      ? <SelectItem value="__none" disabled>Nessun turno</SelectItem>
+                      : colleagueTurni.map((t) => <SelectItem key={t.id} value={t.id.toString()}>{t.data} — {t.tipo}</SelectItem>)}
                   </SelectContent>
                 </Select>
               </div>
             )}
             <div className="space-y-2">
               <Label className="text-muted-foreground">Motivazione <span className="text-muted-foreground/60 font-normal">(opzionale)</span></Label>
-              <Textarea
-                placeholder="Es. Motivi famigliari..."
-                value={swapNota}
-                onChange={(e) => setSwapNota(e.target.value)}
-                rows={3}
-                className="border-white/10 bg-white/5 resize-none"
-              />
+              <Textarea placeholder="Es. Motivi famigliari..." value={swapNota} onChange={(e) => setSwapNota(e.target.value)} rows={3} className="border-white/10 bg-white/5 resize-none" />
             </div>
-            <div className="flex gap-3 pt-1">
-              <Button variant="outline" className="flex-1 border-white/10 hover:bg-white/5" onClick={() => setSwapOpen(false)}>
-                Annulla
-              </Button>
-              <button
-                onClick={submitSwap}
-                disabled={swapLoading || !colleagueId}
-                className="flex-1 rounded-lg font-bold text-sm gap-2 flex items-center justify-center transition-all disabled:opacity-50 glow-gold py-2"
-                style={{ background: "linear-gradient(135deg, #f59e0b, #d97706)", color: "#0f172a" }}
-              >
+            <div className="flex gap-3">
+              <Button variant="outline" className="flex-1 border-white/10 hover:bg-white/5" onClick={() => setSwapOpen(false)}>Annulla</Button>
+              <button onClick={submitSwap} disabled={swapLoading || !colleagueId} className="flex-1 rounded-lg font-bold text-sm gap-2 flex items-center justify-center glow-gold py-2 disabled:opacity-50" style={{ background: "linear-gradient(135deg, #f59e0b, #d97706)", color: "#0f172a" }}>
                 <ArrowLeftRight className="h-4 w-4" />
                 {swapLoading ? "Invio..." : "Invia Richiesta"}
               </button>
@@ -392,33 +313,22 @@ export default function Dashboard() {
         </DialogContent>
       </Dialog>
 
-      {/* ── Staff Preference Dialog (admin / Caposala only) ── */}
+      {/* Preference Dialog */}
       <Dialog open={!!prefTarget} onOpenChange={(open) => !open && setPrefTarget(null)}>
         <DialogContent className="max-w-sm glass-strong border-white/10">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-foreground">
               <Settings2 className="h-5 w-5 text-amber-400" />
-              Preferenze Turni — {prefTarget?.nome}
+              Preferenze — {prefTarget?.nome}
             </DialogTitle>
           </DialogHeader>
-
-          <div className="space-y-5">
-            <p className="text-xs text-muted-foreground">
-              Seleziona i tipi di turno che il sistema può assegnare a questo dipendente durante la generazione automatica.
-            </p>
-
+          <div className="space-y-4">
+            <p className="text-xs text-muted-foreground">Tipi di turno assegnabili in fase di generazione automatica.</p>
             <div className="space-y-2">
               {PREF_OPTIONS.map(({ key, label, icon: Icon, color }) => {
                 const active = prefSelected.includes(key);
                 return (
-                  <button
-                    key={key}
-                    type="button"
-                    onClick={() => togglePref(key)}
-                    className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl border transition-all text-left ${
-                      active ? color : "bg-white/3 border-white/8 text-muted-foreground hover:bg-white/6"
-                    }`}
-                  >
+                  <button key={key} type="button" onClick={() => togglePref(key)} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl border transition-all text-left ${active ? color : "bg-white/3 border-white/8 text-muted-foreground hover:bg-white/6"}`}>
                     <Icon className="h-4 w-4 shrink-0" />
                     <span className="font-semibold text-sm flex-1">{label}</span>
                     {active && <Check className="h-4 w-4 shrink-0" />}
@@ -426,19 +336,10 @@ export default function Dashboard() {
                 );
               })}
             </div>
-
             <div className="flex gap-3">
-              <Button variant="outline" className="flex-1 border-white/10 hover:bg-white/5" onClick={() => setPrefTarget(null)}>
-                Annulla
-              </Button>
-              <button
-                onClick={savePref}
-                disabled={prefLoading || prefSelected.length === 0}
-                className="flex-1 rounded-lg font-bold text-sm flex items-center justify-center gap-2 glow-gold py-2 disabled:opacity-50"
-                style={{ background: "linear-gradient(135deg, #f59e0b, #d97706)", color: "#0f172a" }}
-                data-testid="save-pref"
-              >
-                {prefLoading ? "Salvo..." : "Salva Preferenze"}
+              <Button variant="outline" className="flex-1 border-white/10 hover:bg-white/5" onClick={() => setPrefTarget(null)}>Annulla</Button>
+              <button onClick={savePref} disabled={prefLoading || prefSelected.length === 0} className="flex-1 rounded-lg font-bold text-sm flex items-center justify-center gap-2 glow-gold py-2 disabled:opacity-50" style={{ background: "linear-gradient(135deg, #f59e0b, #d97706)", color: "#0f172a" }}>
+                {prefLoading ? "Salvo..." : "Salva"}
               </button>
             </div>
           </div>

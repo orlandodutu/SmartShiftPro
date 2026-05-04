@@ -1,4 +1,4 @@
-export type Ruolo = 'OSS' | 'INFERMIERA' | 'PULIZIE' | 'DEV' | 'CAPOSALA';
+export type Ruolo = 'OSS' | 'INFERMIERA' | 'AUSILIARIO' | 'DEV' | 'CAPOSALA';
 
 export type Dipendente = {
   id: number;
@@ -10,6 +10,9 @@ export type Dipendente = {
   malattia: number;
   is_admin: boolean;
   preferenze_turno: Array<'MATTINO' | 'POMERIGGIO' | 'NOTTE'>;
+  password_changed: boolean;
+  last_login: string;
+  last_seen: string;
 };
 
 export type TipoTurno = 'MATTINO' | 'POMERIGGIO' | 'NOTTE' | 'FERIE' | 'MALATTIA' | 'RIPOSO';
