@@ -1075,11 +1075,108 @@ def aggiorna_preferenze(id):
     dip = db.session.get(Dipendente, id)
     if not dip:
         return jsonify({'errore': 'Dipendente non trovato'}), 404
+
+    ORE_TIPO = {'MATTINO': 7, 'POMERIGGIO': 7, 'NOTTE': 10, 'SMONTO': 0}
+
     preferenze = request.json.get('preferenze', ['MATTINO', 'POMERIGGIO', 'NOTTE'])
     valide = [p for p in preferenze if p in ('MATTINO', 'POMERIGGIO', 'NOTTE')]
-    dip.preferenze_turno = ','.join(valide) if valide else 'MATTINO,POMERIGGIO,NOTTE'
+    nuove_prefs = set(valide) if valide else {'MATTINO', 'POMERIGGIO', 'NOTTE'}
+    vecchie_prefs = set((dip.preferenze_turno or 'MATTINO,POMERIGGIO,NOTTE').split(','))
+    tipi_rimossi = vecchie_prefs - nuove_prefs
+
+    # Save new preferences first
+    dip.preferenze_turno = ','.join(sorted(nuove_prefs))
+    db.session.flush()
+
+    # ── Riadatta turni futuri ──────────────────────────────────────────────
+    # For each shift type removed from this person's preferences, find their
+    # future auto-generated turni of that type, remove them, and try to
+    # reassign them to another eligible staff member.
+    oggi = date.today().strftime('%Y-%m-%d')
+    riadattati = 0
+
+    for tipo_rimosso in tipi_rimossi:
+        turni_da_spost = Turno.query.filter(
+            Turno.dipendente_id == dip.id,
+            Turno.data >= oggi,
+            Turno.tipo == tipo_rimosso,
+            Turno.manuale == False
+        ).order_by(Turno.data).all()
+
+        for t in turni_da_spost:
+            data_turno = t.data
+
+            # Remove the turno from the original person
+            dip.ore_totali = max(0, dip.ore_totali - (t.ore or 0))
+            if tipo_rimosso == 'NOTTE':
+                dip.notti_fatte = max(0, dip.notti_fatte - 1)
+                # Also remove the SMONTO the next day (auto-generated chain)
+                try:
+                    from datetime import timedelta
+                    smonto_date = (date.fromisoformat(data_turno) + timedelta(days=1)).strftime('%Y-%m-%d')
+                except Exception:
+                    smonto_date = None
+                if smonto_date:
+                    smonto_t = Turno.query.filter_by(
+                        dipendente_id=dip.id, data=smonto_date,
+                        tipo='SMONTO', manuale=False
+                    ).first()
+                    if smonto_t:
+                        dip.ore_totali = max(0, dip.ore_totali - (smonto_t.ore or 0))
+                        db.session.delete(smonto_t)
+            db.session.delete(t)
+
+            # ── Find a replacement ─────────────────────────────────────────
+            candidati = (
+                Dipendente.query
+                .filter(
+                    Dipendente.id != dip.id,
+                    Dipendente.ruolo == dip.ruolo,
+                    Dipendente.is_admin == False
+                )
+                .all()
+            )
+            # Filter: must have the removed tipo in their new preferences
+            # and must not already have any turno on that date
+            candidati_ok = [
+                c for c in candidati
+                if tipo_rimosso in (c.preferenze_turno or 'MATTINO,POMERIGGIO,NOTTE').split(',')
+                and not Turno.query.filter_by(dipendente_id=c.id, data=data_turno).first()
+            ]
+
+            if not candidati_ok:
+                # No direct replacement found — leave unfilled (will be fixed at next generation)
+                riadattati += 1
+                continue
+
+            # Pick the candidate with fewest ore_totali (most rested)
+            sostituto = min(candidati_ok, key=lambda c: c.ore_totali)
+            ore_n = ORE_TIPO.get(tipo_rimosso, 7)
+            nuovo_t = Turno(
+                dipendente_id=sostituto.id, data=data_turno, tipo=tipo_rimosso,
+                ore=ore_n, note=f'Riadatto ({dip.nome}→{sostituto.nome})', manuale=False,
+                ora_inizio=''
+            )
+            db.session.add(nuovo_t)
+            sostituto.ore_totali += ore_n
+            if tipo_rimosso == 'NOTTE':
+                sostituto.notti_fatte += 1
+                # Add SMONTO next day for the replacement if free
+                if smonto_date and not Turno.query.filter_by(
+                        dipendente_id=sostituto.id, data=smonto_date).first():
+                    smonto_new = Turno(
+                        dipendente_id=sostituto.id, data=smonto_date, tipo='SMONTO',
+                        ore=0, note=f'Riadatto ({dip.nome}→{sostituto.nome})', manuale=False,
+                        ora_inizio=''
+                    )
+                    db.session.add(smonto_new)
+            riadattati += 1
+
     db.session.commit()
-    return jsonify(dip.to_dict())
+    result = dip.to_dict()
+    result['riadattati'] = riadattati
+    result['tipi_rimossi'] = list(tipi_rimossi)
+    return jsonify(result)
 
 
 @api.route('/api/manifest.json', methods=['GET'])

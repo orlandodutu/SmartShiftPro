@@ -221,10 +221,20 @@ export default function Dashboard() {
         body: JSON.stringify({ preferenze: prefSelected }),
       });
       if (res.ok) {
-        const updated: Dipendente = await res.json();
+        const updated = await res.json();
         setStats((prev) => prev.map((d) => d.id === updated.id ? updated : d));
         setDipendenti((prev) => prev.map((d) => d.id === updated.id ? updated : d));
-        toast({ title: `Preferenze di ${profileTarget.nome} aggiornate` });
+        const riadattati: number = updated.riadattati ?? 0;
+        const tipiRimossi: string[] = updated.tipi_rimossi ?? [];
+        if (riadattati > 0 && tipiRimossi.length > 0) {
+          toast({
+            title: `Preferenze di ${profileTarget.nome} aggiornate`,
+            description: `${riadattati} turno/i futuri di tipo ${tipiRimossi.join(", ")} spostati automaticamente ad altri colleghi.`,
+          });
+        } else {
+          toast({ title: `Preferenze di ${profileTarget.nome} aggiornate` });
+        }
+        setProfileTarget(null);
       } else toast({ title: "Errore", variant: "destructive" });
     } finally { setPrefLoading(false); }
   };
