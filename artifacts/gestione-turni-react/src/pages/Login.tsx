@@ -43,7 +43,35 @@ export default function Login() {
       <div className="glass-strong rounded-3xl shadow-2xl w-full max-w-sm p-10 text-center">
         {/* Logo */}
         <div className="mb-8">
-          <h1 className="text-4xl font-black tracking-tight mb-1">
+          {/* SS Emblem */}
+          <div className="flex items-center justify-center mb-6">
+            <div className="relative">
+              <div
+                className="absolute inset-0 rounded-2xl"
+                style={{
+                  background: "radial-gradient(circle, rgba(245,158,11,0.35) 0%, transparent 70%)",
+                  filter: "blur(22px)",
+                  transform: "scale(2.4)",
+                }}
+              />
+              <div
+                className="relative h-[72px] w-[72px] rounded-2xl flex items-center justify-center"
+                style={{
+                  background: "rgba(245,158,11,0.06)",
+                  border: "1px solid rgba(245,158,11,0.22)",
+                  boxShadow: "0 0 32px rgba(245,158,11,0.12), inset 0 1px 0 rgba(245,158,11,0.1)",
+                }}
+              >
+                <span
+                  className="text-[28px] text-amber-400"
+                  style={{ fontFamily: "'Inter', 'Helvetica Neue', sans-serif", fontWeight: 200, letterSpacing: "-1.5px" }}
+                >
+                  SS
+                </span>
+              </div>
+            </div>
+          </div>
+          <h1 className="text-3xl font-black tracking-tight mb-1">
             Smart<span className="text-gold">Shift</span>
           </h1>
           <p className="text-xs font-semibold tracking-[0.25em] text-muted-foreground uppercase">

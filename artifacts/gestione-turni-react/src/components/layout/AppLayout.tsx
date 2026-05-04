@@ -60,8 +60,29 @@ export function AppLayout({ children }: { children: ReactNode }) {
         {/* Brand */}
         <div className="px-5 py-5 border-b" style={{ borderColor: "rgba(255,255,255,0.07)" }}>
           <div className="flex items-center gap-2.5">
-            <div className={`h-8 w-8 rounded-lg ${dotClass} flex items-center justify-center`}>
-              <CalendarDays className="h-4 w-4 text-white" />
+            <div className="relative shrink-0">
+              <div
+                className="absolute inset-0 rounded-xl"
+                style={{
+                  background: "radial-gradient(circle, rgba(245,158,11,0.5) 0%, transparent 70%)",
+                  filter: "blur(10px)",
+                  transform: "scale(1.6)",
+                }}
+              />
+              <div
+                className="relative h-8 w-8 rounded-xl flex items-center justify-center"
+                style={{
+                  background: "rgba(245,158,11,0.07)",
+                  border: "1px solid rgba(245,158,11,0.2)",
+                }}
+              >
+                <span
+                  className="text-[13px] text-amber-400"
+                  style={{ fontFamily: "'Inter', sans-serif", fontWeight: 300, letterSpacing: "-0.5px" }}
+                >
+                  SS
+                </span>
+              </div>
             </div>
             <div>
               <h1 className="text-base font-black leading-none">

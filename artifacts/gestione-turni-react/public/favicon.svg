@@ -1,68 +1,28 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
   <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="#192d52"/>
-      <stop offset="100%" stop-color="#080e1e"/>
-    </linearGradient>
-    <linearGradient id="gold" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#fde68a"/>
-      <stop offset="55%" stop-color="#f59e0b"/>
-      <stop offset="100%" stop-color="#b45309"/>
-    </linearGradient>
-    <linearGradient id="accent" x1="0%" y1="0%" x2="100%" y2="0%">
-      <stop offset="0%" stop-color="#fbbf24" stop-opacity="0"/>
-      <stop offset="50%" stop-color="#fbbf24" stop-opacity="0.9"/>
-      <stop offset="100%" stop-color="#fbbf24" stop-opacity="0"/>
-    </linearGradient>
-    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
-      <feGaussianBlur in="SourceGraphic" stdDeviation="10" result="blur"/>
-      <feColorMatrix in="blur" type="saturate" values="3" result="colorBlur"/>
-      <feMerge>
-        <feMergeNode in="colorBlur"/>
-        <feMergeNode in="SourceGraphic"/>
-      </feMerge>
-    </filter>
-    <filter id="shadow" x="-10%" y="-10%" width="120%" height="130%">
-      <feDropShadow dx="0" dy="6" stdDeviation="12" flood-color="#f59e0b" flood-opacity="0.35"/>
+    <radialGradient id="bg" cx="40%" cy="30%" r="80%">
+      <stop offset="0%" stop-color="#0d1a2d"/>
+      <stop offset="100%" stop-color="#050a14"/>
+    </radialGradient>
+    <radialGradient id="glow" cx="50%" cy="58%" r="45%">
+      <stop offset="0%" stop-color="#f59e0b" stop-opacity="0.5"/>
+      <stop offset="55%" stop-color="#f59e0b" stop-opacity="0.15"/>
+      <stop offset="100%" stop-color="#f59e0b" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="tg" x="-35%" y="-35%" width="170%" height="170%">
+      <feGaussianBlur stdDeviation="16" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
     </filter>
   </defs>
-
-  <!-- Background rounded square -->
-  <rect width="512" height="512" rx="108" fill="url(#bg)"/>
-
-  <!-- Subtle inner glow ring -->
-  <rect x="4" y="4" width="504" height="504" rx="105" fill="none"
-        stroke="#f59e0b" stroke-width="2" stroke-opacity="0.3"/>
-
-  <!-- Diagonal accent line (top-left to bottom-right subtle) -->
-  <line x1="80" y1="80" x2="432" y2="432" stroke="#f59e0b" stroke-opacity="0.04" stroke-width="120"/>
-
-  <!-- SS text, bold italic for dynamism -->
-  <text
-    x="258" y="316"
-    font-family="'Impact','Arial Black','Franklin Gothic Heavy',sans-serif"
-    font-size="268" font-weight="900"
-    fill="url(#gold)"
-    filter="url(#shadow)"
-    text-anchor="middle"
-    letter-spacing="-18"
-    font-style="italic">SS</text>
-
-  <!-- Gold separator line below letters -->
-  <rect x="108" y="352" width="296" height="3" rx="1.5" fill="url(#accent)"/>
-
-  <!-- PRO micro-label -->
-  <text
-    x="256" y="412"
-    font-family="'Arial','Helvetica Neue',sans-serif"
-    font-size="44" font-weight="400"
-    fill="#f59e0b" fill-opacity="0.6"
-    text-anchor="middle"
-    letter-spacing="20">PRO</text>
-
-  <!-- Four corner dots, subtle -->
-  <circle cx="80"  cy="80"  r="4" fill="#f59e0b" fill-opacity="0.2"/>
-  <circle cx="432" cy="80"  r="4" fill="#f59e0b" fill-opacity="0.2"/>
-  <circle cx="80"  cy="432" r="4" fill="#f59e0b" fill-opacity="0.2"/>
-  <circle cx="432" cy="432" r="4" fill="#f59e0b" fill-opacity="0.2"/>
+  <rect width="512" height="512" rx="88" fill="url(#bg)"/>
+  <rect x="3" y="3" width="506" height="506" rx="86" fill="none" stroke="#f59e0b" stroke-width="1.5" stroke-opacity="0.18"/>
+  <ellipse cx="256" cy="275" rx="195" ry="155" fill="url(#glow)"/>
+  <text x="256" y="332"
+    font-family="'Helvetica Neue',Helvetica,Arial,sans-serif"
+    font-weight="200" font-size="272" text-anchor="middle"
+    fill="#f59e0b" filter="url(#tg)" letter-spacing="-14">SS</text>
+  <text x="256" y="426"
+    font-family="'Helvetica Neue',sans-serif"
+    font-weight="300" font-size="42" text-anchor="middle"
+    fill="#f59e0b" fill-opacity="0.35" letter-spacing="18">PRO</text>
 </svg>

@@ -65,6 +65,7 @@ class Turno(db.Model):
     ore = db.Column(db.Integer, default=8)
     note = db.Column(db.String(200), default='')
     manuale = db.Column(db.Boolean, default=False)
+    ora_inizio = db.Column(db.String(5), default='')
     dipendente = db.relationship('Dipendente', backref='turni')
 
     def to_dict(self):
@@ -78,6 +79,7 @@ class Turno(db.Model):
             'ore': self.ore,
             'note': self.note,
             'manuale': bool(self.manuale),
+            'ora_inizio': self.ora_inizio or '',
         }
 
 
@@ -442,7 +444,8 @@ def statistiche():
 def _genera_interno(data_inizio_str, giorni):
     """Core shift generation logic. Called by both genera_turni and genera_giorno."""
     ORE_MAP = {'MATTINO': 7, 'POMERIGGIO': 7, 'NOTTE': 10, 'SMONTO': 0, 'RIPOSO': 0, 'FERIE': 0, 'MALATTIA': 0}
-    AUSILIARIO_ORE = 8  # 07:00–15:00
+    AUSILIARIO_ORE = 8
+    AUSILIARIO_ORARI = {'Marina': '07:00', 'Fabiana': '07:00', 'Angela': '08:00'}
 
     try:
         data_inizio = datetime.strptime(data_inizio_str, '%Y-%m-%d').date()
@@ -488,13 +491,13 @@ def _genera_interno(data_inizio_str, giorni):
         notte_ieri  = {t.dipendente_id for t in Turno.query.filter_by(data=ieri_str, tipo='NOTTE').all()}
         smonto_ieri = {t.dipendente_id for t in Turno.query.filter_by(data=ieri_str, tipo='SMONTO').all()}
 
-        def crea(dip, tipo, ore_override=None):
+        def crea(dip, tipo, ore_override=None, ora_inizio=''):
             nonlocal generati, saltati
             if dip.id in gia:
                 saltati += 1
                 return False
             ore = ore_override if ore_override is not None else ORE_MAP.get(tipo, 0)
-            t = Turno(dipendente_id=dip.id, data=data_str, tipo=tipo, ore=ore, note='Auto', manuale=False)
+            t = Turno(dipendente_id=dip.id, data=data_str, tipo=tipo, ore=ore, note='Auto', manuale=False, ora_inizio=ora_inizio)
             db.session.add(t)
             gia.add(dip.id)
             dip.ore_totali += ore
@@ -569,7 +572,9 @@ def _genera_interno(data_inizio_str, giorni):
             if aus_in_turno == 0 and idx == len(aus_libere) - 1:
                 should_work = True
             if should_work:
-                crea(dip, 'MATTINO', AUSILIARIO_ORE); aus_in_turno += 1
+                ora = AUSILIARIO_ORARI.get(dip.nome, '07:00')
+                crea(dip, 'MATTINO', AUSILIARIO_ORE, ora_inizio=ora)
+                aus_in_turno += 1
             else:
                 crea(dip, 'RIPOSO')
 
@@ -972,6 +977,8 @@ if __name__ == '__main__':
                 turno_cols = [c['name'] for c in inspector.get_columns('turno')]
                 if 'manuale' not in turno_cols:
                     conn.execute(text("ALTER TABLE turno ADD COLUMN manuale BOOLEAN DEFAULT 0"))
+                if 'ora_inizio' not in turno_cols:
+                    conn.execute(text("ALTER TABLE turno ADD COLUMN ora_inizio VARCHAR(5) DEFAULT ''"))
                 # Rename PULIZIE → AUSILIARIO
                 conn.execute(text("UPDATE dipendente SET ruolo='AUSILIARIO' WHERE ruolo='PULIZIE'"))
                 conn.commit()

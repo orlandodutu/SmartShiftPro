@@ -34,6 +34,7 @@ export type Turno = {
   ore: number;
   note: string;
   manuale: boolean;
+  ora_inizio: string;
 };
 
 export type Assenza = {

@@ -257,6 +257,9 @@ export default function Turni() {
                           <span className="font-medium text-foreground text-sm flex-1 min-w-0 truncate">{turno.nome}</span>
                           <RoleBadge role={turno.ruolo} />
                           <span className="text-xs text-gold font-bold shrink-0">{turno.ore > 0 ? `${turno.ore}h` : "—"}</span>
+                          {turno.ora_inizio && (
+                            <span className="text-[10px] text-muted-foreground/50 font-mono shrink-0">{turno.ora_inizio}</span>
+                          )}
                           {turno.manuale && (
                             <Lock className="h-3 w-3 text-amber-400/60 shrink-0" title="Turno manuale — non verrà sovrascritto" />
                           )}

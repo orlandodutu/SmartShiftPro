@@ -2,15 +2,102 @@
 <html lang="it">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, viewport-fit=cover" />
     <title>SmartShift Pro</title>
-    <link rel="manifest" href="/flask-api/api/manifest.json" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+
+    <!-- PWA Manifest -->
+    <link rel="manifest" href="/manifest.json?v=3" />
+
+    <!-- Theme color (browser chrome + Android) -->
+    <meta name="theme-color" content="#f59e0b" />
+    <meta name="msapplication-TileColor" content="#0f172a" />
+
+    <!-- Favicon -->
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg?v=3" />
+    <link rel="shortcut icon" href="/favicon.svg?v=3" />
+
+    <!-- iOS PWA -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="SmartShift" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.svg?v=3" />
+
+    <!-- Android / general PWA -->
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="application-name" content="SmartShift" />
+
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet" />
+
+    <style>
+      /* Immediate background — no flash */
+      html, body { background: #0f172a; margin: 0; }
+
+      /* Splash fade-out via CSS — no JS required */
+      @keyframes ss-fade-out {
+        0%, 65% { opacity: 1; }
+        100%     { opacity: 0; pointer-events: none; visibility: hidden; }
+      }
+      #ss-splash {
+        position: fixed; inset: 0; z-index: 9999;
+        background: linear-gradient(145deg, #0a1628 0%, #0f172a 60%, #050a14 100%);
+        display: flex; flex-direction: column;
+        align-items: center; justify-content: center; gap: 20px;
+        animation: ss-fade-out 0.5s ease 1.6s forwards;
+      }
+      #ss-splash .emblem {
+        position: relative; width: 80px; height: 80px;
+      }
+      #ss-splash .emblem-glow {
+        position: absolute; inset: -28px;
+        background: radial-gradient(circle, rgba(245,158,11,0.28) 0%, transparent 65%);
+        filter: blur(18px); border-radius: 50%;
+      }
+      #ss-splash .emblem-box {
+        position: relative; width: 80px; height: 80px;
+        border-radius: 20px;
+        background: rgba(245,158,11,0.07);
+        border: 1px solid rgba(245,158,11,0.22);
+        display: flex; align-items: center; justify-content: center;
+      }
+      #ss-splash .emblem-text {
+        font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+        font-weight: 200; font-size: 30px;
+        color: #f59e0b; letter-spacing: -1.5px;
+        text-shadow: 0 0 20px rgba(245,158,11,0.6);
+      }
+      #ss-splash .brand-name {
+        font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+        font-weight: 900; font-size: 22px; color: #f1f5f9;
+        letter-spacing: -0.5px; line-height: 1;
+      }
+      #ss-splash .brand-name span { color: #f59e0b; }
+      #ss-splash .brand-sub {
+        font-family: 'Helvetica Neue', sans-serif;
+        font-weight: 400; font-size: 10px;
+        color: rgba(148,163,184,0.55);
+        letter-spacing: 3.5px; margin-top: 4px;
+        text-transform: uppercase;
+      }
+    </style>
   </head>
   <body>
+    <!-- Splash Screen (auto-fades after 1.6s) -->
+    <div id="ss-splash" aria-hidden="true">
+      <div class="emblem">
+        <div class="emblem-glow"></div>
+        <div class="emblem-box">
+          <span class="emblem-text">SS</span>
+        </div>
+      </div>
+      <div style="text-align:center;">
+        <div class="brand-name">Smart<span>Shift</span></div>
+        <div class="brand-sub">Pro Management</div>
+      </div>
+    </div>
+
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
