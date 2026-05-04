@@ -15,7 +15,7 @@ import { useToast } from "@/hooks/use-toast";
 import {
   Clock, Moon, CalendarOff, Pill, ArrowLeftRight, User,
   Settings2, Sun, Sunset, BedDouble, Check, Trash2,
-  PlusCircle, AlertTriangle, Palmtree, CalendarX, RotateCcw, ShieldAlert,
+  PlusCircle, AlertTriangle, Palmtree, CalendarX, RotateCcw, ShieldAlert, UserPlus, KeyRound,
 } from "lucide-react";
 import type { Ruolo } from "@/lib/api";
 
@@ -57,6 +57,35 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [dipendenti, setDipendenti] = useState<Dipendente[]>([]);
   const [tutteAssenze, setTutteAssenze] = useState<Assenza[]>([]);
+
+  /* Add user (admin only) */
+  const [addUserOpen, setAddUserOpen] = useState(false);
+  const [addUserLoading, setAddUserLoading] = useState(false);
+  const [newUser, setNewUser] = useState<{ nome: string; ruolo: Ruolo; password: string }>({
+    nome: "", ruolo: "OSS", password: "password123",
+  });
+  const handleAddUser = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newUser.nome.trim()) { toast({ title: "Nome obbligatorio", variant: "destructive" }); return; }
+    setAddUserLoading(true);
+    try {
+      const res = await fetch("/flask-api/api/dipendenti", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ nome: newUser.nome.trim(), ruolo: newUser.ruolo, password: newUser.password || "password123" }),
+      });
+      if (res.ok) {
+        toast({ title: `${newUser.nome.trim()} aggiunto — accesso creato con password: ${newUser.password || "password123"}` });
+        setAddUserOpen(false);
+        setNewUser({ nome: "", ruolo: "OSS", password: "password123" });
+        await fetchData();
+      } else {
+        const err = await res.json();
+        toast({ title: err.errore || "Errore nella creazione", variant: "destructive" });
+      }
+    } finally { setAddUserLoading(false); }
+  };
 
   /* Delete dipendente */
   const [deleteTarget, setDeleteTarget] = useState<Dipendente | null>(null);
@@ -284,15 +313,25 @@ export default function Dashboard() {
             </p>
           </div>
           {user?.is_admin && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setResetOpen(true)}
-              className="shrink-0 gap-2 border-red-500/30 text-red-400/70 hover:text-red-400 hover:bg-red-500/10 hover:border-red-500/50 transition-all"
-            >
-              <RotateCcw className="h-3.5 w-3.5" />
-              <span className="hidden sm:inline">Reset Sistema</span>
-            </Button>
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                onClick={() => setAddUserOpen(true)}
+                className="flex items-center gap-2 px-4 py-2 rounded-lg font-semibold text-sm glow-gold min-h-[36px]"
+                style={{ background: "linear-gradient(155deg, #B8860B 0%, #FFBF00 38%, #FFE566 52%, #FFBF00 75%, #B8860B 100%)", color: "#0f172a" }}
+              >
+                <UserPlus className="h-4 w-4" />
+                <span className="hidden sm:inline">Nuovo Utente</span>
+              </button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setResetOpen(true)}
+                className="gap-2 border-red-500/30 text-red-400/70 hover:text-red-400 hover:bg-red-500/10 hover:border-red-500/50 transition-all"
+              >
+                <RotateCcw className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline">Reset</span>
+              </Button>
+            </div>
           )}
         </div>
       </div>
@@ -676,6 +715,69 @@ export default function Dashboard() {
               </Button>
             </div>
           </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Add User Dialog (admin only) ── */}
+      <Dialog open={addUserOpen} onOpenChange={(open) => !open && !addUserLoading && setAddUserOpen(false)}>
+        <DialogContent className="glass-strong border-white/10 max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-foreground">
+              <UserPlus className="h-4 w-4 text-amber-400" />Nuovo Utente
+            </DialogTitle>
+          </DialogHeader>
+          <form onSubmit={handleAddUser} className="space-y-4">
+            <div className="space-y-2">
+              <Label className="text-muted-foreground">Nome e Cognome</Label>
+              <Input
+                value={newUser.nome}
+                onChange={(e) => setNewUser({ ...newUser, nome: e.target.value })}
+                placeholder="Es. Maria Rossi"
+                required
+                className="border-white/10 bg-white/5"
+                autoFocus
+              />
+            </div>
+            <div className="space-y-2">
+              <Label className="text-muted-foreground">Categoria</Label>
+              <Select value={newUser.ruolo} onValueChange={(v) => setNewUser({ ...newUser, ruolo: v as Ruolo })}>
+                <SelectTrigger className="border-white/10 bg-white/5"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {(["OSS", "INFERMIERA", "AUSILIARIO", "CAPOSALA"] as Ruolo[]).map((r) => (
+                    <SelectItem key={r} value={r}>{r}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label className="text-muted-foreground flex items-center gap-2">
+                <KeyRound className="h-3.5 w-3.5" />Password accesso
+              </Label>
+              <Input
+                value={newUser.password}
+                onChange={(e) => setNewUser({ ...newUser, password: e.target.value })}
+                placeholder="password123"
+                className="border-white/10 bg-white/5 font-mono"
+              />
+              <p className="text-[10px] text-muted-foreground/60">L'utente dovrà cambiarla al primo accesso.</p>
+            </div>
+            <div className="rounded-xl bg-amber-500/8 border border-amber-500/20 p-3 text-xs text-amber-300/80 space-y-1">
+              <p className="font-semibold">Accesso creato automaticamente</p>
+              <p>L'utente potrà entrare con il proprio nome e la password impostata.</p>
+            </div>
+            <div className="flex gap-3 pt-1">
+              <Button variant="outline" className="flex-1 border-white/10 hover:bg-white/5 min-h-[44px]"
+                type="button" onClick={() => setAddUserOpen(false)} disabled={addUserLoading}>
+                Annulla
+              </Button>
+              <button type="submit" disabled={addUserLoading}
+                className="flex-1 py-2.5 rounded-xl font-bold text-sm glow-gold disabled:opacity-40 flex items-center justify-center gap-2 min-h-[44px]"
+                style={{ background: "linear-gradient(155deg, #B8860B 0%, #FFBF00 38%, #FFE566 52%, #FFBF00 75%, #B8860B 100%)", color: "#0f172a" }}>
+                <UserPlus className="h-4 w-4" />
+                {addUserLoading ? "Creazione..." : "Crea Utente"}
+              </button>
+            </div>
+          </form>
         </DialogContent>
       </Dialog>
 

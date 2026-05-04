@@ -294,10 +294,11 @@ def aggiungi_dipendente():
         return jsonify({'errore': 'Nome obbligatorio'}), 400
     if Dipendente.query.filter_by(nome=nome).first():
         return jsonify({'errore': 'Nome già esistente'}), 400
+    password = str(data.get('password', 'password123')).strip() or 'password123'
     nuovo = Dipendente(
         nome=nome,
         ruolo=ruolo,
-        password='password123',
+        password=password,
         password_changed=False,
         preferenze_turno='MATTINO,POMERIGGIO,NOTTE',
     )

@@ -7,6 +7,14 @@ import { RoleBadge } from "@/components/ui/RoleBadge";
 import type { Ruolo } from "@/lib/api";
 import { useSwapNotifications } from "@/hooks/useSwapNotifications";
 
+const ROLE_BG_GLOW: Record<Ruolo, string> = {
+  OSS:        "rgba(59,130,246,0.055)",
+  INFERMIERA: "rgba(16,185,129,0.055)",
+  AUSILIARIO: "rgba(245,158,11,0.055)",
+  DEV:        "rgba(99,102,241,0.055)",
+  CAPOSALA:   "rgba(234,179,8,0.055)",
+};
+
 const ROLE_AVATAR: Record<Ruolo, string> = {
   OSS:        "bg-blue-900/60 text-blue-300",
   INFERMIERA: "bg-emerald-900/60 text-emerald-300",
@@ -154,7 +162,13 @@ export function AppLayout({ children }: { children: ReactNode }) {
       </aside>
 
       {/* Main */}
-      <main className="flex-1 overflow-auto min-h-screen">
+      <main
+        className="flex-1 overflow-auto min-h-screen"
+        style={{
+          background: `radial-gradient(ellipse at 75% 8%, ${ROLE_BG_GLOW[role] ?? ROLE_BG_GLOW.OSS} 0%, transparent 55%),
+                       radial-gradient(ellipse at 20% 90%, ${ROLE_BG_GLOW[role] ?? ROLE_BG_GLOW.OSS} 0%, transparent 45%)`,
+        }}
+      >
         {children}
       </main>
     </div>
