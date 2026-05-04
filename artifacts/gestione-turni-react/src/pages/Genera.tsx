@@ -13,6 +13,18 @@ type Modalita = "settimana" | "mese" | "giorno";
 export default function Genera() {
   const { user } = useAuth();
   const { toast } = useToast();
+
+  if (!user?.is_admin && user?.ruolo !== "CAPOSALA") {
+    return (
+      <div className="p-10 flex flex-col items-center justify-center min-h-[60vh] gap-4 text-center">
+        <div className="p-4 bg-red-500/10 rounded-2xl">
+          <Lock className="h-8 w-8 text-red-400" />
+        </div>
+        <p className="text-lg font-semibold text-foreground">Accesso non autorizzato</p>
+        <p className="text-sm text-muted-foreground">Questa sezione è riservata ad Admin e Caposala.</p>
+      </div>
+    );
+  }
   const [loading, setLoading] = useState(false);
   const [modalita, setModalita] = useState<Modalita>("settimana");
   const [dataInizio, setDataInizio] = useState(new Date().toISOString().split("T")[0]);

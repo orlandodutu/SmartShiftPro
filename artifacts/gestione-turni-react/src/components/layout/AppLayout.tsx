@@ -35,12 +35,12 @@ export function AppLayout({ children }: { children: ReactNode }) {
     { href: "/dashboard", label: "Dashboard",    icon: LayoutDashboard },
     { href: "/turni",     label: "Turni",         icon: CalendarDays    },
     { href: "/scambi",    label: "Scambi",         icon: Shuffle         },
-    { href: "/genera",    label: "Genera Turni",  icon: Wand2           },
   ];
 
   if (user?.ruolo === "CAPOSALA" || user?.is_admin) {
-    navItems.push({ href: "/griglia",  label: "Griglia",  icon: LayoutGrid });
-    navItems.push({ href: "/archivio", label: "Archivio", icon: Archive    });
+    navItems.push({ href: "/genera",   label: "Genera Turni", icon: Wand2      });
+    navItems.push({ href: "/griglia",  label: "Griglia",      icon: LayoutGrid });
+    navItems.push({ href: "/archivio", label: "Archivio",     icon: Archive    });
   }
   if (user?.ruolo === "CAPOSALA") {
     navItems.push({ href: "/caposala", label: "Area Caposala", icon: ShieldAlert });
