@@ -460,18 +460,33 @@ def aggiungi_turno():
     return jsonify(turno.to_dict()), 201
 
 
+def _elimina_smonto_successivo(dip_id, data_notte_str):
+    """Delete next-day SMONTO when a NOTTE is removed or changed."""
+    try:
+        from datetime import datetime as _dt, timedelta as _td
+        d = _dt.strptime(data_notte_str, '%Y-%m-%d').date()
+        domani = (d + _td(days=1)).strftime('%Y-%m-%d')
+        smonto = Turno.query.filter_by(dipendente_id=dip_id, data=domani, tipo='SMONTO').first()
+        if smonto:
+            db.session.delete(smonto)
+    except Exception:
+        pass
+
+
 @api.route('/api/turni/<int:id>', methods=['PUT'])
 def modifica_turno(id):
     if 'user_id' not in session:
         return jsonify({'errore': 'Non autenticato'}), 401
     richiedente = db.session.get(Dipendente, session['user_id'])
-    if not richiedente or not richiedente.is_admin:
-        return jsonify({'errore': 'Non autorizzato — solo admin'}), 403
+    if not richiedente or not (richiedente.is_admin or richiedente.ruolo == 'CAPOSALA'):
+        return jsonify({'errore': 'Non autorizzato'}), 403
     turno = db.session.get(Turno, id)
     if not turno:
         return jsonify({'errore': 'Turno non trovato'}), 404
     data = request.json
     old_dip_id = turno.dipendente_id
+    old_tipo   = turno.tipo
+    old_data   = turno.data
     ore_map = {'MATTINO': 7, 'POMERIGGIO': 7, 'NOTTE': 10, 'SMONTO': 0, 'FERIE': 0, 'MALATTIA': 0, 'RIPOSO': 0}
     if 'dipendente_id' in data:
         turno.dipendente_id = int(data['dipendente_id'])
@@ -485,6 +500,9 @@ def modifica_turno(id):
     if 'ore' in data:
         turno.ore = int(data['ore'])
     turno.manuale = True
+    # Cascade: if this was a NOTTE and tipo changed, delete next-day SMONTO
+    if old_tipo == 'NOTTE' and turno.tipo != 'NOTTE':
+        _elimina_smonto_successivo(old_dip_id, old_data)
     db.session.commit()
     _ricalcola_statistiche(old_dip_id)
     if turno.dipendente_id != old_dip_id:
@@ -495,14 +513,15 @@ def modifica_turno(id):
 @api.route('/api/turni/<int:id>', methods=['DELETE'])
 def elimina_turno(id):
     turno = Turno.query.get_or_404(id)
-    dip = turno.dipendente
-    if dip and dip.ruolo != 'CAPOSALA':
-        dip.ore_totali = max(0, dip.ore_totali - turno.ore)
-        if turno.tipo == 'NOTTE': dip.notti_fatte = max(0, dip.notti_fatte - 1)
-        elif turno.tipo == 'FERIE': dip.ferie = max(0, dip.ferie - 1)
-        elif turno.tipo == 'MALATTIA': dip.malattia = max(0, dip.malattia - 1)
+    dip_id   = turno.dipendente_id
+    tipo     = turno.tipo
+    data_str = turno.data
+    # Cascade: if deleting a NOTTE, remove next-day SMONTO first
+    if tipo == 'NOTTE':
+        _elimina_smonto_successivo(dip_id, data_str)
     db.session.delete(turno)
     db.session.commit()
+    _ricalcola_statistiche(dip_id)
     return jsonify({'success': True})
 
 

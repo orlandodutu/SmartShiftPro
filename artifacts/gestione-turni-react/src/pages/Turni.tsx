@@ -6,7 +6,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { RoleBadge } from "@/components/ui/RoleBadge";
 import { ShiftBadge } from "@/components/ui/ShiftBadge";
 import { useToast } from "@/hooks/use-toast";
-import { Trash2, Plus, FileText, CalendarDays, Pencil, Lock, Share2, Archive } from "lucide-react";
+import { Trash2, Plus, FileText, CalendarDays, Pencil, Lock, Share2, Archive, ArrowLeftRight } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -47,6 +47,16 @@ const TIPO_EMOJI: Record<string, string> = {
   FERIE: "🏖️", MALATTIA: "🤒", RIPOSO: "😴",
 };
 
+const TIPO_COLORS: Record<TipoTurno, string> = {
+  MATTINO:    "border-amber-500/30  text-amber-400  bg-amber-500/10  hover:bg-amber-500/20",
+  POMERIGGIO: "border-orange-500/30 text-orange-400 bg-orange-500/10 hover:bg-orange-500/20",
+  NOTTE:      "border-indigo-500/30 text-indigo-400 bg-indigo-500/10 hover:bg-indigo-500/20",
+  SMONTO:     "border-violet-500/30 text-violet-400 bg-violet-500/10 hover:bg-violet-500/20",
+  RIPOSO:     "border-slate-500/30  text-slate-400  bg-slate-500/10  hover:bg-slate-500/20",
+  FERIE:      "border-emerald-500/30 text-emerald-400 bg-emerald-500/10 hover:bg-emerald-500/20",
+  MALATTIA:   "border-red-500/30    text-red-400    bg-red-500/10    hover:bg-red-500/20",
+};
+
 export default function Turni() {
   const { user } = useAuth();
   const { toast } = useToast();
@@ -64,6 +74,11 @@ export default function Turni() {
   const [editForm, setEditForm] = useState({
     dipendente_id: "", tipo: "MATTINO" as TipoTurno, data: "", ore: 7, note: "",
   });
+
+  // Quick-change dialog (admin + caposala)
+  const [quickShift, setQuickShift] = useState<Turno | null>(null);
+  const [quickTipo, setQuickTipo] = useState<TipoTurno>("MATTINO");
+  const [quickLoading, setQuickLoading] = useState(false);
 
   const canManage = user?.is_admin || user?.ruolo === "CAPOSALA";
 
@@ -134,9 +149,9 @@ export default function Turni() {
   }, []);
 
   const handleDelete = async (id: number) => {
-    if (!confirm("Eliminare questo turno?")) return;
+    if (!confirm("Eliminare questo turno?\n\nSe è una NOTTE, lo smonto del giorno dopo sarà rimosso automaticamente.")) return;
     const res = await fetch(`/flask-api/api/turni/${id}`, { method: "DELETE", credentials: "include" });
-    if (res.ok) { toast({ title: "Turno eliminato" }); setTurni(turni.filter((t) => t.id !== id)); }
+    if (res.ok) { toast({ title: "Turno eliminato" }); fetchTurni(); }
     else toast({ title: "Errore", variant: "destructive" });
   };
 
@@ -166,6 +181,32 @@ export default function Turni() {
     });
     if (res.ok) { toast({ title: "Turno aggiornato — bloccato da ricalcolo" }); setEditShift(null); fetchTurni(); }
     else toast({ title: "Errore", variant: "destructive" });
+  };
+
+  /* ── Quick change turno ── */
+  const openQuick = (turno: Turno) => {
+    setQuickShift(turno);
+    setQuickTipo(turno.tipo);
+  };
+
+  const handleQuickChange = async () => {
+    if (!quickShift || quickTipo === quickShift.tipo) { setQuickShift(null); return; }
+    setQuickLoading(true);
+    const res = await fetch(`/flask-api/api/turni/${quickShift.id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({ tipo: quickTipo }),
+    });
+    setQuickLoading(false);
+    if (res.ok) {
+      const wasNotte = quickShift.tipo === "NOTTE" && quickTipo !== "NOTTE";
+      toast({ title: `Turno cambiato: ${quickShift.tipo} → ${quickTipo}${wasNotte ? " — smonto del giorno dopo rimosso" : ""}` });
+      setQuickShift(null);
+      fetchTurni();
+    } else {
+      toast({ title: "Errore nel cambio turno", variant: "destructive" });
+    }
   };
 
   const sorted = [...turni].sort((a, b) => {
@@ -201,21 +242,18 @@ export default function Turni() {
           <p className="text-sm text-muted-foreground mt-0.5">Raggruppati per settimana — <span className="text-amber-400/70">🔒 = bloccato</span></p>
         </div>
         <div className="flex flex-wrap gap-2">
-          {/* WhatsApp Share */}
           <Button variant="outline"
             className="border-emerald-500/25 hover:bg-emerald-500/10 text-emerald-400 hover:text-emerald-300 gap-2"
             onClick={handleWhatsApp}>
             <Share2 className="h-4 w-4" />WhatsApp
           </Button>
 
-          {/* PDF */}
           <Button variant="outline"
             className="border-white/10 hover:bg-white/5 text-muted-foreground hover:text-foreground gap-2"
             onClick={() => window.open("/flask-api/api/genera_report_mensile", "_blank")}>
             <FileText className="h-4 w-4" />{canManage ? "PDF" : "Mio PDF"}
           </Button>
 
-          {/* Add shift */}
           {canManage && (
             <Dialog open={isAddOpen} onOpenChange={setIsAddOpen}>
               <DialogTrigger asChild>
@@ -312,9 +350,9 @@ export default function Turni() {
                       {shifts.map((turno) => (
                         <div key={turno.id}
                           className={`flex items-center gap-3 px-5 py-3 border-l-2 ${TIPO_LEFT[turno.tipo] ?? "border-l-transparent"} ${
-                            user?.is_admin ? "hover:bg-white/4 cursor-pointer" : ""
+                            canManage ? "hover:bg-white/4 cursor-pointer" : ""
                           }`}
-                          onClick={() => user?.is_admin && openEdit(turno)}
+                          onClick={() => canManage && openQuick(turno)}
                         >
                           <ShiftBadge type={turno.tipo} />
                           <span className="font-medium text-foreground text-sm flex-1 min-w-0 truncate">{turno.nome}</span>
@@ -328,6 +366,11 @@ export default function Turni() {
                           )}
                           {canManage && (
                             <div className="flex gap-1 shrink-0">
+                              <Button variant="ghost" size="icon"
+                                className="h-7 w-7 text-muted-foreground/40 hover:text-amber-400 hover:bg-amber-500/10"
+                                onClick={(e) => { e.stopPropagation(); openQuick(turno); }}>
+                                <ArrowLeftRight className="h-3 w-3" />
+                              </Button>
                               {user?.is_admin && (
                                 <Button variant="ghost" size="icon"
                                   className="h-7 w-7 text-muted-foreground/40 hover:text-amber-400 hover:bg-amber-500/10"
@@ -376,12 +419,84 @@ export default function Turni() {
         </div>
       )}
 
-      {/* Edit dialog */}
+      {/* ── Quick Change Turno dialog (admin + caposala) ── */}
+      <Dialog open={!!quickShift} onOpenChange={(open) => !open && setQuickShift(null)}>
+        <DialogContent className="glass-strong border-white/10 max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-foreground">
+              <ArrowLeftRight className="h-4 w-4 text-amber-400" />Cambia Turno
+            </DialogTitle>
+          </DialogHeader>
+          {quickShift && (
+            <div className="space-y-4">
+              <div className="rounded-xl bg-white/4 border border-white/8 px-4 py-3 space-y-1">
+                <p className="text-sm font-semibold text-foreground">{quickShift.nome}</p>
+                <p className="text-xs text-muted-foreground">
+                  {new Date(quickShift.data + "T00:00:00").toLocaleDateString("it-IT", { weekday: "long", day: "numeric", month: "long" })}
+                </p>
+                <div className="flex items-center gap-2 mt-1">
+                  <ShiftBadge type={quickShift.tipo} />
+                  {quickTipo !== quickShift.tipo && (
+                    <>
+                      <ArrowLeftRight className="h-3 w-3 text-muted-foreground/50" />
+                      <ShiftBadge type={quickTipo} />
+                    </>
+                  )}
+                </div>
+              </div>
+
+              {quickShift.tipo === "NOTTE" && quickTipo !== "NOTTE" && (
+                <div className="rounded-xl bg-violet-500/8 border border-violet-500/20 p-3 text-xs text-violet-300 flex gap-2">
+                  <span className="shrink-0">💤</span>
+                  <span>Lo smonto del giorno successivo verrà rimosso automaticamente.</span>
+                </div>
+              )}
+
+              <div className="space-y-2">
+                <Label className="text-muted-foreground text-xs uppercase tracking-wide">Nuovo tipo</Label>
+                <div className="grid grid-cols-2 gap-2">
+                  {ALL_TIPI.map((tipo) => (
+                    <button
+                      key={tipo}
+                      onClick={() => setQuickTipo(tipo)}
+                      className={`flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm font-semibold border transition-all ${
+                        quickTipo === tipo
+                          ? TIPO_COLORS[tipo]
+                          : "border-white/8 text-muted-foreground bg-white/3 hover:bg-white/6"
+                      }`}>
+                      <span>{TIPO_EMOJI[tipo]}</span>
+                      <span className="truncate">{tipo}</span>
+                      {quickTipo === tipo && <span className="ml-auto text-[10px] opacity-70">✓</span>}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex gap-3 pt-1">
+                <Button variant="outline" className="flex-1 border-white/10 hover:bg-white/5 min-h-[44px]"
+                  onClick={() => setQuickShift(null)}>
+                  Annulla
+                </Button>
+                <button
+                  disabled={quickLoading || quickTipo === quickShift.tipo}
+                  onClick={handleQuickChange}
+                  className="flex-1 py-2.5 rounded-xl font-bold text-sm glow-gold disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2 min-h-[44px]"
+                  style={{ background: "linear-gradient(155deg, #B8860B 0%, #FFBF00 38%, #FFE566 52%, #FFBF00 75%, #B8860B 100%)", color: "#0f172a" }}>
+                  <ArrowLeftRight className="h-4 w-4" />
+                  {quickLoading ? "Salvataggio..." : "Conferma"}
+                </button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Full Edit dialog — admin only */}
       <Dialog open={!!editShift} onOpenChange={(open) => !open && setEditShift(null)}>
         <DialogContent className="glass-strong border-white/10 max-w-md">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-foreground">
-              <Pencil className="h-4 w-4 text-amber-400" />Modifica Turno
+              <Pencil className="h-4 w-4 text-amber-400" />Modifica Turno Completa
               <span className="ml-auto flex items-center gap-1 text-[10px] font-normal text-amber-400/70">
                 <Lock className="h-3 w-3" />verrà bloccato
               </span>
