@@ -31,15 +31,14 @@ function showBrowserNotification(count: number) {
   if (!("Notification" in window)) return;
   if (Notification.permission !== "granted") return;
   try {
-    const n = new Notification("SmartShift Pro", {
+    const opts: NotificationOptions = {
       body: count === 1
         ? "1 nuova richiesta di scambio turno in attesa"
         : `${count} nuove richieste di scambio turno in attesa`,
       icon: "/favicon.svg",
-      badge: "/favicon.svg",
       tag: "swap-request",
-      renotify: true,
-    });
+    };
+    const n = new Notification("SmartShift Pro", opts);
     n.onclick = () => {
       window.focus();
       n.close();

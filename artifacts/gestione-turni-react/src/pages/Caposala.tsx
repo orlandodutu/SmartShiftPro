@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { RichiestaScambio, Dipendente } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
@@ -14,7 +14,15 @@ import { ShiftBadge } from "@/components/ui/ShiftBadge";
 import {
   Check, X, CalendarRange, Calendar, ShieldAlert, ArrowLeftRight,
   MessageCircle, UserPlus, Pencil, KeyRound, Phone, Users, Copy, Trash2,
+  Sun, Sunset, BedDouble,
 } from "lucide-react";
+
+type Pref = "MATTINO" | "POMERIGGIO" | "NOTTE";
+const PREF_OPTIONS: { key: Pref; label: string; icon: typeof Sun; color: string }[] = [
+  { key: "MATTINO",    label: "Mattino",    icon: Sun,       color: "bg-amber-500/15 text-amber-300 border-amber-500/30"    },
+  { key: "POMERIGGIO", label: "Pomeriggio", icon: Sunset,    color: "bg-orange-500/15 text-orange-300 border-orange-500/30" },
+  { key: "NOTTE",      label: "Notte",      icon: BedDouble, color: "bg-indigo-500/15 text-indigo-300 border-indigo-500/30" },
+];
 
 const CRYSTAL = "linear-gradient(155deg, #B8860B 0%, #FFBF00 38%, #FFE566 52%, #FFBF00 75%, #B8860B 100%)";
 const WA_GREEN = "linear-gradient(135deg, #128C7E, #25D366)";
@@ -62,9 +70,11 @@ export default function Caposala() {
   const [createdCreds, setCreatedCreds] = useState<CreatedCreds | null>(null);
   const [editDip, setEditDip] = useState<Dipendente | null>(null);
   const [editRuolo, setEditRuolo] = useState("");
+  const [editPrefs, setEditPrefs] = useState<Pref[]>(["MATTINO", "POMERIGGIO", "NOTTE"]);
   const [editLoading, setEditLoading] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<Dipendente | null>(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
+  const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const fetchRichieste = async () => {
     setLoadingRichieste(true);
@@ -84,6 +94,9 @@ export default function Caposala() {
   useEffect(() => {
     fetchRichieste();
     fetchDipendenti();
+    /* Polling ogni 5s per aggiornamento in tempo reale */
+    pollingRef.current = setInterval(fetchRichieste, 5_000);
+    return () => { if (pollingRef.current) clearInterval(pollingRef.current); };
   }, []);
 
   // ─── Generation ───
@@ -190,24 +203,46 @@ export default function Caposala() {
   const openEdit = (d: Dipendente) => {
     setEditDip(d);
     setEditRuolo(d.ruolo);
+    setEditPrefs((d.preferenze_turno ?? ["MATTINO", "POMERIGGIO", "NOTTE"]) as Pref[]);
   };
 
   const handleSaveEdit = async () => {
     if (!editDip) return;
+    if (editPrefs.length === 0) {
+      toast({ title: "Seleziona almeno un tipo di turno", variant: "destructive" }); return;
+    }
     setEditLoading(true);
     try {
-      const res = await fetch(`/flask-api/api/dipendenti/${editDip.id}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({ ruolo: editRuolo }),
-      });
-      if (res.ok) {
-        toast({ title: `${editDip.nome} aggiornato` });
+      const [ruoloRes, prefRes] = await Promise.all([
+        fetch(`/flask-api/api/dipendenti/${editDip.id}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({ ruolo: editRuolo }),
+        }),
+        fetch(`/flask-api/api/dipendenti/${editDip.id}/preferenze`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({ preferenze: editPrefs }),
+        }),
+      ]);
+      if (ruoloRes.ok && prefRes.ok) {
+        const prefData = await prefRes.json();
+        const riadattati: number = prefData.riadattati ?? 0;
+        const tipiRimossi: string[] = prefData.tipi_rimossi ?? [];
+        if (riadattati > 0 && tipiRimossi.length > 0) {
+          toast({
+            title: `${editDip.nome} aggiornato`,
+            description: `${riadattati} turno/i futuri di tipo ${tipiRimossi.join(", ")} spostati automaticamente.`,
+          });
+        } else {
+          toast({ title: `${editDip.nome} aggiornato` });
+        }
         setEditDip(null);
         fetchDipendenti();
       } else {
-        toast({ title: "Errore", variant: "destructive" });
+        toast({ title: "Errore nel salvataggio", variant: "destructive" });
       }
     } finally {
       setEditLoading(false);
@@ -819,7 +854,7 @@ export default function Caposala() {
             </DialogTitle>
           </DialogHeader>
           {editDip && (
-            <div className="space-y-4">
+            <div className="space-y-5">
               <div className="space-y-1.5">
                 <Label className="text-muted-foreground text-xs">Ruolo</Label>
                 <Select value={editRuolo} onValueChange={setEditRuolo}>
@@ -833,6 +868,32 @@ export default function Caposala() {
                   </SelectContent>
                 </Select>
               </div>
+
+              <div className="space-y-2">
+                <Label className="text-muted-foreground text-xs">Turni assegnabili nella generazione automatica</Label>
+                <div className="space-y-1.5">
+                  {PREF_OPTIONS.map(({ key, label, icon: Icon, color }) => {
+                    const active = editPrefs.includes(key);
+                    return (
+                      <button
+                        key={key}
+                        type="button"
+                        onClick={() => setEditPrefs((prev) =>
+                          prev.includes(key) ? prev.filter((p) => p !== key) : [...prev, key]
+                        )}
+                        className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl border transition-all text-left ${
+                          active ? color : "bg-white/3 border-white/8 text-muted-foreground hover:bg-white/6"
+                        }`}
+                      >
+                        <Icon className="h-4 w-4 shrink-0" />
+                        <span className="font-semibold text-sm flex-1">{label}</span>
+                        {active && <Check className="h-4 w-4 shrink-0" />}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
               <div className="flex gap-3">
                 <Button variant="outline" className="flex-1 border-white/10 hover:bg-white/5" onClick={() => setEditDip(null)} disabled={editLoading}>
                   Annulla
@@ -840,7 +901,7 @@ export default function Caposala() {
                 <Button
                   className="flex-1 bg-blue-600 hover:bg-blue-500 text-white gap-2"
                   onClick={handleSaveEdit}
-                  disabled={editLoading}
+                  disabled={editLoading || editPrefs.length === 0}
                   data-testid="confirm-edit"
                 >
                   <Check className="h-4 w-4" />

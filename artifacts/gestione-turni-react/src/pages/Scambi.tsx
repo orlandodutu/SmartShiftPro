@@ -11,7 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { ShiftBadge } from "@/components/ui/ShiftBadge";
 import { RoleBadge } from "@/components/ui/RoleBadge";
-import { Plus, ArrowLeftRight, Clock } from "lucide-react";
+import { Plus, ArrowLeftRight, Clock, Trash2 } from "lucide-react";
 
 const CRYSTAL = "linear-gradient(155deg, #B8860B 0%, #FFBF00 38%, #FFE566 52%, #FFBF00 75%, #B8860B 100%)";
 
@@ -54,6 +54,27 @@ export default function Scambi() {
     turno_destinatario_id: "",
     nota: "",
   });
+
+  const [cancelLoading, setCancelLoading] = useState<number | null>(null);
+
+  const handleCancel = async (id: number) => {
+    setCancelLoading(id);
+    try {
+      const res = await fetch(`/flask-api/api/scambi/${id}`, {
+        method: "DELETE",
+        credentials: "include",
+      });
+      if (res.ok) {
+        toast({ title: "Richiesta annullata" });
+        fetchData();
+      } else {
+        const err = await res.json();
+        toast({ title: err.errore || "Errore", variant: "destructive" });
+      }
+    } finally {
+      setCancelLoading(null);
+    }
+  };
 
   const fetchData = async () => {
     if (!user) return;
@@ -213,9 +234,21 @@ export default function Scambi() {
                     <p className="text-sm text-amber-400 font-medium">Nota Caposala: {s.nota_caposala}</p>
                   )}
                 </div>
-                <div className="flex items-center gap-1.5 text-xs text-muted-foreground/60 shrink-0">
-                  <Clock className="h-3 w-3" />
-                  {new Date(s.creata_il).toLocaleDateString("it-IT")}
+                <div className="flex flex-col items-end gap-2 shrink-0">
+                  <div className="flex items-center gap-1.5 text-xs text-muted-foreground/60">
+                    <Clock className="h-3 w-3" />
+                    {new Date(s.creata_il).toLocaleDateString("it-IT")}
+                  </div>
+                  {s.stato === "IN_ATTESA" && (
+                    <button
+                      onClick={() => handleCancel(s.id)}
+                      disabled={cancelLoading === s.id}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border border-red-500/30 text-red-400 bg-red-500/8 hover:bg-red-500/15 hover:border-red-400/50 transition-colors disabled:opacity-50"
+                    >
+                      <Trash2 className="h-3 w-3" />
+                      {cancelLoading === s.id ? "Annullo..." : "Annulla"}
+                    </button>
+                  )}
                 </div>
               </CardContent>
             </Card>
