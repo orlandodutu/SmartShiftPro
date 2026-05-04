@@ -317,7 +317,7 @@ export default function Dashboard() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {stats.slice().sort((a, b) => b.ore_totali - a.ore_totali).map((dip) => {
+                    {stats.slice().filter(d => d.ruolo !== 'CAPOSALA').sort((a, b) => b.ore_totali - a.ore_totali).map((dip) => {
                       const absence = canManage ? getAbsenceToday(dip.id) : undefined;
                       return (
                         <TableRow

@@ -451,7 +451,7 @@ def aggiungi_turno():
     )
     db.session.add(turno)
     dip = Dipendente.query.get(data['dipendente_id'])
-    if dip:
+    if dip and dip.ruolo != 'CAPOSALA':
         dip.ore_totali += ore
         if data['tipo'] == 'NOTTE': dip.notti_fatte += 1
         elif data['tipo'] == 'FERIE': dip.ferie += 1
@@ -496,7 +496,7 @@ def modifica_turno(id):
 def elimina_turno(id):
     turno = Turno.query.get_or_404(id)
     dip = turno.dipendente
-    if dip:
+    if dip and dip.ruolo != 'CAPOSALA':
         dip.ore_totali = max(0, dip.ore_totali - turno.ore)
         if turno.tipo == 'NOTTE': dip.notti_fatte = max(0, dip.notti_fatte - 1)
         elif turno.tipo == 'FERIE': dip.ferie = max(0, dip.ferie - 1)
@@ -575,7 +575,8 @@ def _genera_interno(data_inizio_str, giorni):
             t = Turno(dipendente_id=dip.id, data=data_str, tipo=tipo, ore=ore, note='Auto', manuale=False, ora_inizio=ora_inizio)
             db.session.add(t)
             gia.add(dip.id)
-            dip.ore_totali += ore
+            if dip.ruolo != 'CAPOSALA':
+                dip.ore_totali += ore
             if tipo == 'NOTTE':    dip.notti_fatte += 1
             elif tipo == 'FERIE':  dip.ferie       += 1
             elif tipo == 'MALATTIA': dip.malattia  += 1
@@ -755,7 +756,7 @@ def reset_mese():
     eliminati = 0
     for t in turni:
         dip = t.dipendente
-        if dip:
+        if dip and dip.ruolo != 'CAPOSALA':
             dip.ore_totali = max(0, dip.ore_totali - t.ore)
             if t.tipo == 'NOTTE':    dip.notti_fatte = max(0, dip.notti_fatte - 1)
             elif t.tipo == 'FERIE':  dip.ferie       = max(0, dip.ferie - 1)
@@ -965,7 +966,8 @@ def _ricalcola_statistiche(dipendente_id):
     dip = Dipendente.query.get(dipendente_id)
     if not dip: return
     turni = Turno.query.filter_by(dipendente_id=dipendente_id).all()
-    dip.ore_totali = sum(t.ore for t in turni)
+    if dip.ruolo != 'CAPOSALA':
+        dip.ore_totali = sum(t.ore for t in turni)
     dip.notti_fatte = sum(1 for t in turni if t.tipo == 'NOTTE')
     dip.ferie = sum(1 for t in turni if t.tipo == 'FERIE')
     dip.malattia = sum(1 for t in turni if t.tipo == 'MALATTIA')
@@ -1073,7 +1075,7 @@ def legacy_aggiungi_turno():
     turno = Turno(dipendente_id=data['dipendente_id'], data=data['data'], tipo=data['tipo'], ore=ore, note=data.get('note', ''))
     db.session.add(turno)
     dip = Dipendente.query.get(data['dipendente_id'])
-    if dip:
+    if dip and dip.ruolo != 'CAPOSALA':
         dip.ore_totali += ore
         if data['tipo'] == 'NOTTE': dip.notti_fatte += 1
         elif data['tipo'] == 'FERIE': dip.ferie += 1
@@ -1085,7 +1087,7 @@ def legacy_aggiungi_turno():
 def legacy_elimina_turno(id):
     turno = Turno.query.get_or_404(id)
     dip = turno.dipendente
-    if dip:
+    if dip and dip.ruolo != 'CAPOSALA':
         dip.ore_totali = max(0, dip.ore_totali - turno.ore)
         if turno.tipo == 'NOTTE': dip.notti_fatte = max(0, dip.notti_fatte - 1)
         elif turno.tipo == 'FERIE': dip.ferie = max(0, dip.ferie - 1)
