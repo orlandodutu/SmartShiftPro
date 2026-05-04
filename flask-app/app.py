@@ -666,37 +666,38 @@ def _genera_interno(data_inizio_str, giorni):
                 crea(dip, 'SMONTO')
             # Note: day-after-SMONTO rest is handled via urgency in section 4 below
 
-        # ── 3b. NOTTE assignment: prefer OSS who haven't done NOTTE this week ──
-        assigned_notte = False
+        # ── 3b. Pre-reserve NOTTE candidate (exclude from regular shift pool) ──
+        # Selecting the NOTTE worker BEFORE section 4 guarantees coverage even on Sunday
+        # when all notte-eligible OSS would otherwise end up in must_rest and get RIPOSO.
+        notte_riserva_id = None
         for offset in range(len(oss_notturni)):
-            candidate = oss_notturni[(i + offset) % len(oss_notturni)]
-            if candidate.id in gia or candidate.id in assenti_ids:
+            cand = oss_notturni[(i + offset) % len(oss_notturni)]
+            if cand.id in gia or cand.id in assenti_ids:
                 continue
-            if oss_notti_week.get((candidate.id, cal_week), False):
-                continue  # Prefer fresh candidate
-            if crea(candidate, 'NOTTE'):
-                oss_notti_week[(candidate.id, cal_week)] = True
-            assigned_notte = True
+            if oss_notti_week.get((cand.id, cal_week), False):
+                continue  # Prefer fresh (no NOTTE yet this week)
+            notte_riserva_id = cand.id
             break
-        if not assigned_notte:
+        if notte_riserva_id is None:
             for offset in range(len(oss_notturni)):
-                candidate = oss_notturni[(i + offset) % len(oss_notturni)]
-                if candidate.id not in gia and candidate.id not in assenti_ids:
-                    if crea(candidate, 'NOTTE'):
-                        oss_notti_week[(candidate.id, cal_week)] = True
+                cand = oss_notturni[(i + offset) % len(oss_notturni)]
+                if cand.id not in gia and cand.id not in assenti_ids:
+                    notte_riserva_id = cand.id
                     break
+        # (If notte_riserva_id is still None, we'll fall back to double shifts in 4b)
 
         # ── 4. Remaining OSS: urgency-based exactly 1 RIPOSO per calendar week ──
-        #
         # Strategy: each OSS has a designated rest weekday = (rank + week_num_local) % 7.
         # Additionally, on the last day of the week (Sunday / last generation day),
         # anyone who still hasn't rested is forced to rest (urgency = 1).
         # Post-SMONTO rest: OSS who had SMONTO yesterday need today as their RIPOSO.
-        #
         week_num_local = i // 7
         is_last_day_of_week = (weekday == 6) or (i == giorni - 1)
         n = len(all_oss)
-        oss_liberi = [d for d in all_oss if d.id not in gia and d.id not in assenti_ids]
+        # Exclude the pre-reserved NOTTE candidate from regular assignment
+        oss_liberi = [d for d in all_oss
+                      if d.id not in gia and d.id not in assenti_ids
+                      and d.id != notte_riserva_id]
 
         oss_must_rest  = []  # must rest today (designated day, post-SMONTO, or last day)
         oss_may_rest   = []  # haven't rested yet but can wait
@@ -743,6 +744,70 @@ def _genera_interno(data_inizio_str, giorni):
         for dip in oss_must_rest:
             crea(dip, 'RIPOSO')
             oss_riposi_week[(dip.id, cal_week)] = True
+
+        # ── 4b. NOTTE assignment — after regular OSS shifts to allow double shifts ──
+        #
+        # Priority order:
+        #   P1: pre-reserved pure NOTTE candidate (selected in section 3b)
+        #   P2: POMERIGGIO-NOTTE double (notte-eligible OSS already on POMERIGGIO today)
+        #   P3: MATTINO-NOTTE double  (notte-eligible OSS already on MATTINO today)
+        #
+        def _add_notte_direct(candidate, primo_turno=''):
+            """Create NOTTE turno directly, bypassing gia check (for pre-reserved / doubles)."""
+            nonlocal generati
+            ore_n = ORE_MAP['NOTTE']
+            nota  = f'Auto ({primo_turno}+NOTTE)' if primo_turno else 'Auto'
+            t = Turno(
+                dipendente_id=candidate.id, data=data_str, tipo='NOTTE',
+                ore=ore_n, note=nota, manuale=False, ora_inizio=''
+            )
+            db.session.add(t)
+            gia.add(candidate.id)
+            candidate.ore_totali += ore_n
+            candidate.notti_fatte += 1
+            oss_notti_week[(candidate.id, cal_week)] = True
+            generati += 1
+
+        assigned_notte = False
+
+        # P1: pure NOTTE — assign to pre-reserved candidate
+        if notte_riserva_id is not None:
+            for d in oss_notturni:
+                if d.id == notte_riserva_id:
+                    _add_notte_direct(d)
+                    assigned_notte = True
+                    break
+
+        # P2: POMERIGGIO-NOTTE double shift fallback
+        if not assigned_notte:
+            pom_oggi = {
+                t.dipendente_id
+                for t in Turno.query.filter_by(data=data_str, tipo='POMERIGGIO').all()
+            }
+            for offset in range(len(oss_notturni)):
+                candidate = oss_notturni[(i + offset) % len(oss_notturni)]
+                if candidate.id in assenti_ids:
+                    continue
+                if (candidate.id in pom_oggi
+                        and not oss_notti_week.get((candidate.id, cal_week), False)):
+                    _add_notte_direct(candidate, 'POMERIGGIO')
+                    assigned_notte = True
+                    break
+
+        # P3: MATTINO-NOTTE double shift (last resort)
+        if not assigned_notte:
+            mat_oggi = {
+                t.dipendente_id
+                for t in Turno.query.filter_by(data=data_str, tipo='MATTINO').all()
+            }
+            for offset in range(len(oss_notturni)):
+                candidate = oss_notturni[(i + offset) % len(oss_notturni)]
+                if candidate.id in assenti_ids:
+                    continue
+                if (candidate.id in mat_oggi
+                        and not oss_notti_week.get((candidate.id, cal_week), False)):
+                    _add_notte_direct(candidate, 'MATTINO')
+                    break
 
         # ── 5. Ausiliari: 07–15 (8h), urgency-based exactly 1 RIPOSO per calendar week ──
         n_aus = len(ausiliari)
