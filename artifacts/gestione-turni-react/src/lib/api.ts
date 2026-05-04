@@ -35,6 +35,7 @@ export type Turno = {
   note: string;
   manuale: boolean;
   ora_inizio: string;
+  archivio_mese: string;
 };
 
 export type Assenza = {

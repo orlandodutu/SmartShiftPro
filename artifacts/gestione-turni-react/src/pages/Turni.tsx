@@ -6,7 +6,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { RoleBadge } from "@/components/ui/RoleBadge";
 import { ShiftBadge } from "@/components/ui/ShiftBadge";
 import { useToast } from "@/hooks/use-toast";
-import { Trash2, Plus, FileText, CalendarDays, Pencil, Lock } from "lucide-react";
+import { Trash2, Plus, FileText, CalendarDays, Pencil, Lock, Share2, Archive } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -42,6 +42,11 @@ const TIPO_LEFT: Record<TipoTurno, string> = {
   MALATTIA:   "border-l-red-400",
 };
 
+const TIPO_EMOJI: Record<string, string> = {
+  MATTINO: "🌅", POMERIGGIO: "🌆", NOTTE: "🌙", SMONTO: "💤",
+  FERIE: "🏖️", MALATTIA: "🤒", RIPOSO: "😴",
+};
+
 export default function Turni() {
   const { user } = useAuth();
   const { toast } = useToast();
@@ -65,6 +70,54 @@ export default function Turni() {
   const fetchTurni = async () => {
     const res = await fetch("/flask-api/api/turni", { credentials: "include" });
     if (res.ok) setTurni(await res.json());
+  };
+
+  /* ── WhatsApp Share ── */
+  const handleWhatsApp = () => {
+    if (turni.length === 0) {
+      toast({ title: "Nessun turno da condividere", variant: "destructive" });
+      return;
+    }
+    const localSorted = [...turni].sort((a, b) => a.data.localeCompare(b.data));
+    const byDate: Record<string, Turno[]> = {};
+    localSorted.forEach(t => { if (!byDate[t.data]) byDate[t.data] = []; byDate[t.data].push(t); });
+
+    let text = "📋 *SmartShift Pro*\n";
+    Object.keys(byDate).sort().slice(0, 14).forEach(dateStr => {
+      const d = new Date(dateStr + "T00:00:00");
+      const lbl = d.toLocaleDateString("it-IT", { weekday: "short", day: "numeric", month: "short" });
+      text += `\n📅 *${lbl.charAt(0).toUpperCase() + lbl.slice(1)}*\n`;
+      const byTipo: Record<string, string[]> = {};
+      byDate[dateStr].forEach(t => {
+        if (!["RIPOSO", "SMONTO"].includes(t.tipo)) {
+          if (!byTipo[t.tipo]) byTipo[t.tipo] = [];
+          byTipo[t.tipo].push(t.nome.split(" ")[0]);
+        }
+      });
+      Object.entries(byTipo).forEach(([tipo, nomi]) => {
+        if (nomi.length) text += `${TIPO_EMOJI[tipo] || "•"} ${tipo}: ${nomi.join(", ")}\n`;
+      });
+    });
+    window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, "_blank");
+  };
+
+  /* ── Archive current month ── */
+  const handleArchivia = async () => {
+    const mese = new Date().toISOString().substring(0, 7);
+    if (!confirm(`Archiviare tutti i turni di ${mese}?\n\nSaranno consultabili nell'Archivio Storico ma non apparranno più nella lista principale.`)) return;
+    const res = await fetch("/flask-api/api/turni/archivia", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({ mese }),
+    });
+    if (res.ok) {
+      const d = await res.json();
+      toast({ title: `${d.archiviati} turni di ${mese} archiviati con successo` });
+      fetchTurni();
+    } else {
+      toast({ title: "Errore durante l'archiviazione", variant: "destructive" });
+    }
   };
 
   useEffect(() => {
@@ -142,28 +195,38 @@ export default function Turni() {
 
   return (
     <div className="p-6 md:p-10 max-w-7xl mx-auto space-y-6">
-      <div className="flex justify-between items-center">
+      <div className="flex flex-wrap justify-between items-start gap-3">
         <div>
           <h1 className="text-2xl font-bold text-foreground tracking-tight">Lista Turni</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">Raggruppati per settimana — <span className="text-amber-400/70">🔒 = bloccato da ricalcolo</span></p>
+          <p className="text-sm text-muted-foreground mt-0.5">Raggruppati per settimana — <span className="text-amber-400/70">🔒 = bloccato</span></p>
         </div>
-        <div className="flex gap-3">
-          <Button variant="outline" className="border-white/10 hover:bg-white/5 text-muted-foreground hover:text-foreground gap-2"
-            onClick={() => window.open("/flask-api/api/genera_report_mensile", "_blank")}>
-            <FileText className="h-4 w-4" />{canManage ? "PDF Completo" : "Mio PDF"}
+        <div className="flex flex-wrap gap-2">
+          {/* WhatsApp Share */}
+          <Button variant="outline"
+            className="border-emerald-500/25 hover:bg-emerald-500/10 text-emerald-400 hover:text-emerald-300 gap-2"
+            onClick={handleWhatsApp}>
+            <Share2 className="h-4 w-4" />WhatsApp
           </Button>
 
+          {/* PDF */}
+          <Button variant="outline"
+            className="border-white/10 hover:bg-white/5 text-muted-foreground hover:text-foreground gap-2"
+            onClick={() => window.open("/flask-api/api/genera_report_mensile", "_blank")}>
+            <FileText className="h-4 w-4" />{canManage ? "PDF" : "Mio PDF"}
+          </Button>
+
+          {/* Add shift */}
           {canManage && (
             <Dialog open={isAddOpen} onOpenChange={setIsAddOpen}>
               <DialogTrigger asChild>
-                <button className="flex items-center gap-2 px-4 py-2 rounded-lg font-semibold text-sm glow-gold"
+                <button className="flex items-center gap-2 px-4 py-2 rounded-lg font-semibold text-sm glow-gold min-h-[40px]"
                   style={{ background: "linear-gradient(135deg, #f59e0b, #d97706)", color: "#0f172a" }}>
-                  <Plus className="h-4 w-4" />Aggiungi Turno
+                  <Plus className="h-4 w-4" />Aggiungi
                 </button>
               </DialogTrigger>
               <DialogContent className="glass-strong border-white/10 max-w-md">
                 <DialogHeader><DialogTitle className="text-foreground">Nuovo Turno Manuale</DialogTitle></DialogHeader>
-                <p className="text-xs text-amber-400/70 -mt-1">I turni manuali sono bloccati e non verranno sovrascritti dal ricalcolo automatico.</p>
+                <p className="text-xs text-amber-400/70 -mt-1">I turni manuali non vengono sovrascritti dal ricalcolo automatico.</p>
                 <form onSubmit={handleAdd} className="space-y-4">
                   <div className="space-y-2">
                     <Label className="text-muted-foreground">Dipendente</Label>
@@ -290,6 +353,30 @@ export default function Turni() {
         ))
       )}
 
+      {/* ── Archive Management (admin / caposala) ── */}
+      {canManage && !loading && (
+        <div className="pt-6 border-t border-white/6">
+          <p className="text-xs font-bold text-muted-foreground/50 uppercase tracking-widest mb-3 flex items-center gap-2">
+            <Archive className="h-3.5 w-3.5" />Gestione Archivio
+          </p>
+          <div className="glass rounded-2xl border border-white/8 p-5 flex flex-wrap items-center justify-between gap-4">
+            <div className="min-w-0">
+              <p className="text-sm font-semibold text-foreground">Archivia Mese Corrente</p>
+              <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
+                Sposta i turni del mese <span className="font-mono text-amber-400/70">{new Date().toISOString().substring(0, 7)}</span> nell'archivio storico.
+                Non verranno più mostrati nella lista principale.
+              </p>
+            </div>
+            <button
+              onClick={handleArchivia}
+              className="shrink-0 flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold border border-indigo-500/30 text-indigo-400 hover:bg-indigo-500/10 active:bg-indigo-500/15 transition-all min-h-[44px]">
+              <Archive className="h-4 w-4" />Archivia Mese
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Edit dialog */}
       <Dialog open={!!editShift} onOpenChange={(open) => !open && setEditShift(null)}>
         <DialogContent className="glass-strong border-white/10 max-w-md">
           <DialogHeader>

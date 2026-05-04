@@ -13,6 +13,7 @@ import Scambi from "@/pages/Scambi";
 import Caposala from "@/pages/Caposala";
 import Monitor from "@/pages/Monitor";
 import Griglia from "@/pages/Griglia";
+import Archivio from "@/pages/Archivio";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -148,6 +149,7 @@ function Router() {
       <Route path="/genera" component={() => <ProtectedRoute component={Genera} />} />
       <Route path="/caposala" component={() => <ProtectedRoute component={Caposala} />} />
       <Route path="/griglia" component={() => <ProtectedRoute component={Griglia} />} />
+      <Route path="/archivio" component={() => <ProtectedRoute component={Archivio} />} />
       <Route path="/monitor" component={() => <ProtectedRoute component={Monitor} adminOnly />} />
       <Route component={NotFound} />
     </Switch>

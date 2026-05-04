@@ -61,6 +61,33 @@
         background: rgba(245,158,11,0.07);
         border: 1px solid rgba(245,158,11,0.22);
         display: flex; align-items: center; justify-content: center;
+        overflow: hidden;
+      }
+      /* Shimmer sweep — GPU accelerated */
+      #ss-splash .shimmer {
+        position: absolute;
+        top: -30%; left: 0;
+        width: 50%; height: 160%;
+        background: linear-gradient(
+          105deg,
+          transparent 20%,
+          rgba(255,255,255,0.10) 38%,
+          rgba(255,255,255,0.30) 50%,
+          rgba(255,255,255,0.10) 62%,
+          transparent 80%
+        );
+        transform: translateX(-200%) skewX(-20deg);
+        will-change: transform;
+        -webkit-animation: ss-shimmer 0.65s cubic-bezier(0.4,0,0.2,1) 0.5s forwards;
+        animation:         ss-shimmer 0.65s cubic-bezier(0.4,0,0.2,1) 0.5s forwards;
+      }
+      @-webkit-keyframes ss-shimmer {
+        0%   { transform: translateX(-200%) skewX(-20deg); }
+        100% { transform: translateX(420%) skewX(-20deg); }
+      }
+      @keyframes ss-shimmer {
+        0%   { transform: translateX(-200%) skewX(-20deg); }
+        100% { transform: translateX(420%) skewX(-20deg); }
       }
       #ss-splash .emblem-text {
         font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
@@ -89,6 +116,7 @@
       <div class="emblem">
         <div class="emblem-glow"></div>
         <div class="emblem-box">
+          <div class="shimmer"></div>
           <span class="emblem-text">SS</span>
         </div>
       </div>

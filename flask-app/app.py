@@ -66,6 +66,7 @@ class Turno(db.Model):
     note = db.Column(db.String(200), default='')
     manuale = db.Column(db.Boolean, default=False)
     ora_inizio = db.Column(db.String(5), default='')
+    archivio_mese = db.Column(db.String(7), default='')
     dipendente = db.relationship('Dipendente', backref='turni')
 
     def to_dict(self):
@@ -80,6 +81,7 @@ class Turno(db.Model):
             'note': self.note,
             'manuale': bool(self.manuale),
             'ora_inizio': self.ora_inizio or '',
+            'archivio_mese': self.archivio_mese or '',
         }
 
 
@@ -344,7 +346,10 @@ def get_turni():
     data_inizio  = request.args.get('data_inizio')
     data_fine    = request.args.get('data_fine')
 
+    includi_archivio = request.args.get('archivio', 'false').lower() == 'true'
     query = Turno.query
+    if not includi_archivio:
+        query = query.filter(db.or_(Turno.archivio_mese == '', Turno.archivio_mese.is_(None)))
     if mese and anno:
         prefix = f"{anno}-{mese.zfill(2)}"
         query = query.filter(Turno.data.like(f"{prefix}%"))
@@ -617,6 +622,78 @@ def genera_giorno():
 @api.route('/api/genera_programmazione', methods=['POST'])
 def genera_programmazione():
     return genera_turni()
+
+
+@api.route('/api/turni/archivia', methods=['POST'])
+def archivia_turni():
+    if 'user_id' not in session:
+        return jsonify({'errore': 'Non autenticato'}), 401
+    richiedente = db.session.get(Dipendente, session['user_id'])
+    if not richiedente or not (richiedente.is_admin or richiedente.ruolo == 'CAPOSALA'):
+        return jsonify({'errore': 'Non autorizzato'}), 403
+    data = request.json or {}
+    mese = data.get('mese', date.today().strftime('%Y-%m'))
+    turni = Turno.query.filter(
+        Turno.data.like(f"{mese}%"),
+        db.or_(Turno.archivio_mese == '', Turno.archivio_mese.is_(None))
+    ).all()
+    count = 0
+    for t in turni:
+        t.archivio_mese = mese
+        count += 1
+    db.session.commit()
+    return jsonify({'success': True, 'archiviati': count, 'mese': mese})
+
+
+@api.route('/api/archivio', methods=['GET'])
+def get_archivio_mesi():
+    if 'user_id' not in session:
+        return jsonify({'errore': 'Non autenticato'}), 401
+    from sqlalchemy import func
+    risultati = db.session.query(
+        Turno.archivio_mese,
+        func.count(Turno.id).label('count')
+    ).filter(
+        Turno.archivio_mese != '',
+        Turno.archivio_mese.isnot(None)
+    ).group_by(Turno.archivio_mese).order_by(Turno.archivio_mese.desc()).all()
+    return jsonify([{'mese': r[0], 'count': r[1]} for r in risultati])
+
+
+@api.route('/api/archivio/<mese>', methods=['GET'])
+def get_archivio_mese(mese):
+    if 'user_id' not in session:
+        return jsonify({'errore': 'Non autenticato'}), 401
+    turni = Turno.query.filter_by(archivio_mese=mese).order_by(Turno.data).all()
+    return jsonify([t.to_dict() for t in turni])
+
+
+@api.route('/api/turni/reset_mese', methods=['POST'])
+def reset_mese():
+    if 'user_id' not in session:
+        return jsonify({'errore': 'Non autenticato'}), 401
+    richiedente = db.session.get(Dipendente, session['user_id'])
+    if not richiedente or not richiedente.is_admin:
+        return jsonify({'errore': 'Non autorizzato — solo admin'}), 403
+    data = request.json or {}
+    mese = data.get('mese', date.today().strftime('%Y-%m'))
+    turni = Turno.query.filter(
+        Turno.data.like(f"{mese}%"),
+        Turno.manuale == False,
+        db.or_(Turno.archivio_mese == '', Turno.archivio_mese.is_(None))
+    ).all()
+    eliminati = 0
+    for t in turni:
+        dip = t.dipendente
+        if dip:
+            dip.ore_totali = max(0, dip.ore_totali - t.ore)
+            if t.tipo == 'NOTTE':    dip.notti_fatte = max(0, dip.notti_fatte - 1)
+            elif t.tipo == 'FERIE':  dip.ferie       = max(0, dip.ferie - 1)
+            elif t.tipo == 'MALATTIA': dip.malattia  = max(0, dip.malattia - 1)
+        db.session.delete(t)
+        eliminati += 1
+    db.session.commit()
+    return jsonify({'success': True, 'eliminati': eliminati, 'mese': mese})
 
 
 @api.route('/api/scambi', methods=['GET'])
@@ -979,6 +1056,8 @@ if __name__ == '__main__':
                     conn.execute(text("ALTER TABLE turno ADD COLUMN manuale BOOLEAN DEFAULT 0"))
                 if 'ora_inizio' not in turno_cols:
                     conn.execute(text("ALTER TABLE turno ADD COLUMN ora_inizio VARCHAR(5) DEFAULT ''"))
+                if 'archivio_mese' not in turno_cols:
+                    conn.execute(text("ALTER TABLE turno ADD COLUMN archivio_mese VARCHAR(7) DEFAULT ''"))
                 # Rename PULIZIE → AUSILIARIO
                 conn.execute(text("UPDATE dipendente SET ruolo='AUSILIARIO' WHERE ruolo='PULIZIE'"))
                 conn.commit()

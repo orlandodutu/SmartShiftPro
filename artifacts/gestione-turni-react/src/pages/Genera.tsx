@@ -3,17 +3,25 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
-import { Wand2, CheckCircle2, CalendarDays, Lock } from "lucide-react";
+import { useAuth } from "@/contexts/AuthContext";
+import { Wand2, CheckCircle2, CalendarDays, Lock, RotateCcw, AlertTriangle } from "lucide-react";
 
 type Modalita = "settimana" | "mese" | "giorno";
 
 export default function Genera() {
+  const { user } = useAuth();
   const { toast } = useToast();
   const [loading, setLoading] = useState(false);
   const [modalita, setModalita] = useState<Modalita>("settimana");
   const [dataInizio, setDataInizio] = useState(new Date().toISOString().split("T")[0]);
   const [result, setResult] = useState<{ generati: number; saltati: number; giorni: number; modalita: string } | null>(null);
+
+  const currentMese = new Date().toISOString().substring(0, 7);
+  const [resetOpen, setResetOpen] = useState(false);
+  const [resetInput, setResetInput] = useState("");
+  const [resetLoading, setResetLoading] = useState(false);
 
   const handleGenera = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -46,6 +54,35 @@ export default function Genera() {
       toast({ title: "Errore di connessione", variant: "destructive" });
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleReset = async () => {
+    if (resetInput !== currentMese) {
+      toast({ title: `Digita "${currentMese}" per confermare`, variant: "destructive" });
+      return;
+    }
+    setResetLoading(true);
+    try {
+      const res = await fetch("/flask-api/api/turni/reset_mese", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ mese: currentMese }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        toast({ title: `${data.eliminati} turni auto-generati eliminati per ${currentMese}` });
+        setResetOpen(false);
+        setResetInput("");
+        setResult(null);
+      } else {
+        toast({ title: data.errore || "Errore", variant: "destructive" });
+      }
+    } catch {
+      toast({ title: "Errore di connessione", variant: "destructive" });
+    } finally {
+      setResetLoading(false);
     }
   };
 
@@ -155,6 +192,73 @@ export default function Genera() {
           )}
         </CardContent>
       </Card>
+
+      {/* ── Danger Zone — only admin ── */}
+      {user?.is_admin && (
+        <div className="rounded-2xl border border-red-500/20 bg-red-500/4 p-5 space-y-3">
+          <p className="text-xs font-bold text-red-400/80 uppercase tracking-wide flex items-center gap-2">
+            <AlertTriangle className="h-3.5 w-3.5" />Zona Pericolosa
+          </p>
+          <div className="flex items-start gap-4 flex-wrap">
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold text-foreground">Nuova Generazione — Reset Mese</p>
+              <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
+                Elimina tutti i turni <strong className="text-foreground">auto-generati</strong> del mese corrente
+                (<span className="font-mono text-amber-400/70">{currentMese}</span>).
+                I turni manuali 🔒 vengono preservati. Usa per ricalcolare il mese da zero.
+              </p>
+            </div>
+            <button
+              onClick={() => setResetOpen(true)}
+              className="shrink-0 flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold border border-red-500/30 text-red-400 hover:bg-red-500/10 active:bg-red-500/15 transition-all min-h-[44px]">
+              <RotateCcw className="h-4 w-4" />Reset
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── Reset Confirmation Dialog ── */}
+      <Dialog open={resetOpen} onOpenChange={(open) => { setResetOpen(open); if (!open) setResetInput(""); }}>
+        <DialogContent className="glass-strong border-white/10 max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-red-400">
+              <AlertTriangle className="h-4 w-4" />Conferma Reset Mese
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <p className="text-sm text-muted-foreground leading-relaxed">
+              Stai per eliminare tutti i turni <strong className="text-foreground">auto-generati</strong> del mese{" "}
+              <span className="font-mono text-amber-400">{currentMese}</span>.
+              I turni manuali saranno mantenuti.
+            </p>
+            <div className="rounded-xl bg-red-500/8 border border-red-500/20 p-3">
+              <p className="text-xs text-red-300">
+                Digita <strong className="font-mono">{currentMese}</strong> per sbloccare la conferma
+              </p>
+            </div>
+            <Input
+              value={resetInput}
+              onChange={(e) => setResetInput(e.target.value)}
+              placeholder={currentMese}
+              className="border-white/10 bg-white/5 font-mono text-center tracking-widest"
+            />
+            <div className="flex gap-3 pt-1">
+              <button
+                className="flex-1 py-2.5 rounded-xl text-sm font-semibold border border-white/10 text-muted-foreground hover:bg-white/5 transition-all min-h-[44px]"
+                onClick={() => { setResetOpen(false); setResetInput(""); }}>
+                Annulla
+              </button>
+              <button
+                disabled={resetInput !== currentMese || resetLoading}
+                onClick={handleReset}
+                className="flex-1 py-2.5 rounded-xl text-sm font-bold border border-red-500/30 text-red-400 hover:bg-red-500/10 transition-all disabled:opacity-35 disabled:cursor-not-allowed min-h-[44px] flex items-center justify-center gap-2">
+                <RotateCcw className="h-3.5 w-3.5" />
+                {resetLoading ? "Reset..." : "Conferma"}
+              </button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
