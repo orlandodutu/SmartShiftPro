@@ -508,7 +508,7 @@ def elimina_turno(id):
 
 @api.route('/api/statistiche', methods=['GET'])
 def statistiche():
-    dipendenti = Dipendente.query.all()
+    dipendenti = Dipendente.query.filter(Dipendente.ruolo != 'CAPOSALA').all()
     return jsonify([{
         'id': d.id, 'nome': d.nome, 'ruolo': d.ruolo,
         'ore_totali': d.ore_totali, 'notti_fatte': d.notti_fatte,
@@ -533,8 +533,8 @@ def _genera_interno(data_inizio_str, giorni):
     def is_notte_eligible(d):
         return 'NOTTE' in (d.preferenze_turno or 'MATTINO,POMERIGGIO').split(',')
 
-    # Separate groups (admin excluded from role-based groups)
-    admin_staff = [d for d in all_dip if d.is_admin]
+    # Separate groups (admin excluded from role-based groups; CAPOSALA excluded entirely)
+    admin_staff = [d for d in all_dip if d.is_admin and d.ruolo != 'CAPOSALA']
     infermieri  = [d for d in all_dip if d.ruolo == 'INFERMIERA' and not d.is_admin]
     all_oss     = [d for d in all_dip if d.ruolo == 'OSS'        and not d.is_admin]
     oss_notturni = [d for d in all_oss if is_notte_eligible(d)]
