@@ -64,6 +64,7 @@ class Turno(db.Model):
     tipo = db.Column(db.String(20), nullable=False)
     ore = db.Column(db.Integer, default=8)
     note = db.Column(db.String(200), default='')
+    manuale = db.Column(db.Boolean, default=False)
     dipendente = db.relationship('Dipendente', backref='turni')
 
     def to_dict(self):
@@ -75,7 +76,8 @@ class Turno(db.Model):
             'data': self.data,
             'tipo': self.tipo,
             'ore': self.ore,
-            'note': self.note
+            'note': self.note,
+            'manuale': bool(self.manuale),
         }
 
 
@@ -334,14 +336,20 @@ def elimina_dipendente(id):
 
 @api.route('/api/turni', methods=['GET'])
 def get_turni():
-    mese = request.args.get('mese')
-    anno = request.args.get('anno')
+    mese         = request.args.get('mese')
+    anno         = request.args.get('anno')
     dipendente_id = request.args.get('dipendente_id')
+    data_inizio  = request.args.get('data_inizio')
+    data_fine    = request.args.get('data_fine')
 
     query = Turno.query
     if mese and anno:
         prefix = f"{anno}-{mese.zfill(2)}"
         query = query.filter(Turno.data.like(f"{prefix}%"))
+    if data_inizio:
+        query = query.filter(Turno.data >= data_inizio)
+    if data_fine:
+        query = query.filter(Turno.data <= data_fine)
     if dipendente_id:
         query = query.filter_by(dipendente_id=dipendente_id)
 
@@ -351,15 +359,18 @@ def get_turni():
 
 @api.route('/api/turni', methods=['POST'])
 def aggiungi_turno():
+    if 'user_id' not in session:
+        return jsonify({'errore': 'Non autenticato'}), 401
     data = request.json
-    ore_map = {'MATTINO': 7, 'POMERIGGIO': 7, 'NOTTE': 10, 'FERIE': 0, 'MALATTIA': 0, 'RIPOSO': 0}
+    ore_map = {'MATTINO': 7, 'POMERIGGIO': 7, 'NOTTE': 10, 'SMONTO': 0, 'FERIE': 0, 'MALATTIA': 0, 'RIPOSO': 0}
     ore = ore_map.get(data.get('tipo', 'MATTINO'), 8)
     turno = Turno(
         dipendente_id=data['dipendente_id'],
         data=data['data'],
         tipo=data['tipo'],
         ore=ore,
-        note=data.get('note', '')
+        note=data.get('note', ''),
+        manuale=True,
     )
     db.session.add(turno)
     dip = Dipendente.query.get(data['dipendente_id'])
@@ -384,7 +395,7 @@ def modifica_turno(id):
         return jsonify({'errore': 'Turno non trovato'}), 404
     data = request.json
     old_dip_id = turno.dipendente_id
-    ore_map = {'MATTINO': 7, 'POMERIGGIO': 7, 'NOTTE': 10, 'FERIE': 0, 'MALATTIA': 0, 'RIPOSO': 0}
+    ore_map = {'MATTINO': 7, 'POMERIGGIO': 7, 'NOTTE': 10, 'SMONTO': 0, 'FERIE': 0, 'MALATTIA': 0, 'RIPOSO': 0}
     if 'dipendente_id' in data:
         turno.dipendente_id = int(data['dipendente_id'])
     if 'tipo' in data:
@@ -396,6 +407,7 @@ def modifica_turno(id):
         turno.note = str(data['note'])[:200]
     if 'ore' in data:
         turno.ore = int(data['ore'])
+    turno.manuale = True
     db.session.commit()
     _ricalcola_statistiche(old_dip_id)
     if turno.dipendente_id != old_dip_id:
@@ -427,37 +439,31 @@ def statistiche():
     } for d in dipendenti])
 
 
-@api.route('/api/turni/genera', methods=['POST'])
-def genera_turni():
-    data = request.json
-    modalita = data.get('modalita', 'settimana')
-    data_inizio_str = data.get('data_inizio')
+def _genera_interno(data_inizio_str, giorni):
+    """Core shift generation logic. Called by both genera_turni and genera_giorno."""
+    ORE_MAP = {'MATTINO': 7, 'POMERIGGIO': 7, 'NOTTE': 10, 'SMONTO': 0, 'RIPOSO': 0, 'FERIE': 0, 'MALATTIA': 0}
+    AUSILIARIO_ORE = 8  # 07:00–15:00
+
     try:
         data_inizio = datetime.strptime(data_inizio_str, '%Y-%m-%d').date()
     except Exception:
         data_inizio = date.today()
 
-    giorni = 7 if modalita == 'settimana' else 30
+    all_dip = Dipendente.query.order_by(Dipendente.nome).all()
 
-    # Night-eligible OSS by name (lowercase)
-    NOTTE_OSS_NOMI = {'carmen', 'elena', 'barbara'}
-    # Ausiliarie work 7:00–15:00 = 8h (not 7h like OSS mattino)
-    AUSILIARIO_ORE = 8
-    ORE_MAP = {'MATTINO': 7, 'POMERIGGIO': 7, 'NOTTE': 10, 'RIPOSO': 0, 'FERIE': 0, 'MALATTIA': 0}
+    # Night-eligible = 'NOTTE' in their preferenze_turno field
+    def is_notte_eligible(d):
+        return 'NOTTE' in (d.preferenze_turno or 'MATTINO,POMERIGGIO').split(',')
 
-    all_dip = Dipendente.query.filter(
-        Dipendente.ruolo.in_(['OSS', 'INFERMIERA', 'AUSILIARIO'])
-    ).order_by(Dipendente.nome).all()
-
-    # Separate staff groups
-    oss_notturni = [d for d in all_dip if d.ruolo == 'OSS' and d.nome.lower() in NOTTE_OSS_NOMI]
-    oss_diurni   = [d for d in all_dip if d.ruolo == 'OSS' and d.nome.lower() not in NOTTE_OSS_NOMI]
-    all_oss      = oss_notturni + oss_diurni
-    infermieri   = [d for d in all_dip if d.ruolo == 'INFERMIERA']
-    ausiliari    = [d for d in all_dip if d.ruolo == 'AUSILIARIO']
+    # Separate groups (admin excluded from role-based groups)
+    admin_staff = [d for d in all_dip if d.is_admin]
+    infermieri  = [d for d in all_dip if d.ruolo == 'INFERMIERA' and not d.is_admin]
+    all_oss     = [d for d in all_dip if d.ruolo == 'OSS'        and not d.is_admin]
+    oss_notturni = [d for d in all_oss if is_notte_eligible(d)]
+    ausiliari   = [d for d in all_dip if d.ruolo == 'AUSILIARIO' and not d.is_admin]
 
     if not all_dip:
-        return jsonify({'errore': 'Nessun dipendente trovato'}), 400
+        return None, 'Nessun dipendente trovato'
 
     generati = 0
     saltati  = 0
@@ -465,17 +471,22 @@ def genera_turni():
     for i in range(giorni):
         giorno   = data_inizio + timedelta(days=i)
         data_str = giorno.strftime('%Y-%m-%d')
-        weekday  = giorno.weekday()  # 0=Mon … 5=Sat … 6=Sun
+        ieri_str = (giorno - timedelta(days=1)).strftime('%Y-%m-%d')
+        weekday  = giorno.weekday()  # 0=Mon…6=Sun
 
-        # IDs already assigned today (existing or created this loop)
+        # IDs with any existing shift today (manuale or not)
         gia = {t.dipendente_id for t in Turno.query.filter_by(data=data_str).all()}
 
-        # Staff absent (MALATTIA/FERIE) for this day
+        # Active absences for this day
         assenze_oggi = Assenza.query.filter(
             Assenza.data_inizio <= data_str,
             Assenza.data_fine   >= data_str
         ).all()
         assenti_ids = {a.dipendente_id for a in assenze_oggi}
+
+        # Night-chain tracking from yesterday
+        notte_ieri  = {t.dipendente_id for t in Turno.query.filter_by(data=ieri_str, tipo='NOTTE').all()}
+        smonto_ieri = {t.dipendente_id for t in Turno.query.filter_by(data=ieri_str, tipo='SMONTO').all()}
 
         def crea(dip, tipo, ore_override=None):
             nonlocal generati, saltati
@@ -483,7 +494,7 @@ def genera_turni():
                 saltati += 1
                 return False
             ore = ore_override if ore_override is not None else ORE_MAP.get(tipo, 0)
-            t = Turno(dipendente_id=dip.id, data=data_str, tipo=tipo, ore=ore, note='Auto-generato')
+            t = Turno(dipendente_id=dip.id, data=data_str, tipo=tipo, ore=ore, note='Auto', manuale=False)
             db.session.add(t)
             gia.add(dip.id)
             dip.ore_totali += ore
@@ -493,68 +504,109 @@ def genera_turni():
             generati += 1
             return True
 
-        # ── 0. Pre-assign absence shifts so absent staff are excluded from coverage ──
+        # ── 0. Pre-assign absence shifts (MALATTIA / FERIE) ──
         for assenza in assenze_oggi:
-            dip_assente = db.session.get(Dipendente, assenza.dipendente_id)
-            if dip_assente and dip_assente.id not in gia:
-                crea(dip_assente, assenza.tipo)  # MALATTIA or FERIE
+            dip_a = db.session.get(Dipendente, assenza.dipendente_id)
+            if dip_a and dip_a.id not in gia:
+                crea(dip_a, assenza.tipo)
 
-        # ── 1. INFERMIERA (Anna): MATTINO Mon–Fri, rest Sun always, alt-Sat ──
+        # ── 1. Admin: fixed MATTINO (7h), rest Sunday ──
+        for dip in admin_staff:
+            if dip.id in gia: continue
+            if weekday == 6:
+                crea(dip, 'RIPOSO')
+            else:
+                crea(dip, 'MATTINO', 7)
+
+        # ── 2. Infermiera: MATTINO, rest Sun always, alt-Sat ──
         for dip in infermieri:
-            if weekday == 6:                      # Sunday → always rest
+            if dip.id in gia: continue
+            if weekday == 6:
                 crea(dip, 'RIPOSO')
-            elif weekday == 5 and (i // 7) % 2 == 0:  # alternate Saturday → rest
+            elif weekday == 5 and (i // 7) % 2 == 0:
                 crea(dip, 'RIPOSO')
             else:
-                crea(dip, 'MATTINO')              # 7h (07:00–14:00)
+                crea(dip, 'MATTINO', 7)
 
-        # ── 2. OSS NOTTE: exactly 1 per day, rotating among night-eligible only ──
-        if oss_notturni:
-            night_dip = oss_notturni[i % len(oss_notturni)]
-            crea(night_dip, 'NOTTE')
+        # ── 3. OSS Night chain: SMONTO and RIPOSO from yesterday ──
+        for dip in all_oss:
+            if dip.id in gia: continue
+            if dip.id in notte_ieri:
+                crea(dip, 'SMONTO')
+            elif dip.id in smonto_ieri:
+                crea(dip, 'RIPOSO')
 
-        # ── 3. OSS MATTINO (min 3) + POMERIGGIO (min 2) + RIPOSO for the rest ──
-        # Rotate the ordering daily for fairness
+        # Assign tonight's NOTTE: 1 night-eligible OSS not yet assigned
+        for offset in range(len(oss_notturni)):
+            candidate = oss_notturni[(i + offset) % len(oss_notturni)]
+            if candidate.id not in gia and candidate.id not in assenti_ids:
+                crea(candidate, 'NOTTE')
+                break
+
+        # ── 4. Remaining OSS: M≥3, P≥2, rest RIPOSO ──
         n = len(all_oss)
-        oss_ordinati = sorted(
-            [d for d in all_oss if d.id not in gia],
-            key=lambda d: (all_oss.index(d) + i) % n
+        oss_liberi = sorted(
+            [d for d in all_oss if d.id not in gia and d.id not in assenti_ids],
+            key=lambda d: (all_oss.index(d) + i) % n if n else 0
         )
-        mattino_c = pomeriggio_c = 0
-        for dip in oss_ordinati:
-            if dip.id in gia:
-                continue
-            if mattino_c < 3:
-                crea(dip, 'MATTINO')
-                mattino_c += 1
-            elif pomeriggio_c < 2:
-                crea(dip, 'POMERIGGIO')
-                pomeriggio_c += 1
+        m_c = p_c = 0
+        for dip in oss_liberi:
+            if m_c < 3:
+                crea(dip, 'MATTINO');  m_c += 1
+            elif p_c < 2:
+                crea(dip, 'POMERIGGIO'); p_c += 1
             else:
                 crea(dip, 'RIPOSO')
 
-        # ── 4. AUSILIARIE: separate from OSS, 7–15 (8h), never NOTTE ──
-        # Rotate so that 2 of 3 work each day; guarantee at least 1.
-        aus_libere = [d for d in ausiliari if d.id not in gia]
+        # ── 5. Ausiliari: 07–15 (8h), separate from OSS, min 1/day ──
+        aus_libere = [d for d in ausiliari if d.id not in gia and d.id not in assenti_ids]
         n_aus = len(ausiliari)
         aus_in_turno = 0
-        for dip in aus_libere:
-            orig_idx   = ausiliari.index(dip)
-            slot       = (orig_idx + i) % n_aus if n_aus > 0 else 0
-            # slot < (n_aus-1) means 2 out of 3 work each day
+        for idx, dip in enumerate(aus_libere):
+            orig_idx = ausiliari.index(dip)
+            slot = (orig_idx + i) % n_aus if n_aus > 0 else 0
             should_work = slot < (n_aus - 1) if n_aus > 1 else True
-            # Force at least 1 if this is the last unassigned ausiliaria
-            if aus_in_turno == 0 and dip is aus_libere[-1]:
+            if aus_in_turno == 0 and idx == len(aus_libere) - 1:
                 should_work = True
             if should_work:
-                crea(dip, 'MATTINO', AUSILIARIO_ORE)
-                aus_in_turno += 1
+                crea(dip, 'MATTINO', AUSILIARIO_ORE); aus_in_turno += 1
             else:
                 crea(dip, 'RIPOSO')
 
         db.session.commit()
 
-    return jsonify({'success': True, 'generati': generati, 'saltati': saltati, 'modalita': modalita, 'giorni': giorni})
+    return {'success': True, 'generati': generati, 'saltati': saltati, 'giorni': giorni}, None
+
+
+@api.route('/api/turni/genera', methods=['POST'])
+def genera_turni():
+    if 'user_id' not in session:
+        return jsonify({'errore': 'Non autenticato'}), 401
+    richiedente = db.session.get(Dipendente, session['user_id'])
+    if not richiedente or not (richiedente.is_admin or richiedente.ruolo == 'CAPOSALA'):
+        return jsonify({'errore': 'Non autorizzato'}), 403
+    data = request.json or {}
+    modalita = data.get('modalita', 'settimana')
+    giorni = 1 if modalita == 'giorno' else (30 if modalita == 'mese' else 7)
+    result, err = _genera_interno(data.get('data_inizio', date.today().strftime('%Y-%m-%d')), giorni)
+    if err: return jsonify({'errore': err}), 400
+    result['modalita'] = modalita
+    return jsonify(result)
+
+
+@api.route('/api/turni/genera_giorno', methods=['POST'])
+def genera_giorno():
+    if 'user_id' not in session:
+        return jsonify({'errore': 'Non autenticato'}), 401
+    richiedente = db.session.get(Dipendente, session['user_id'])
+    if not richiedente or not (richiedente.is_admin or richiedente.ruolo == 'CAPOSALA'):
+        return jsonify({'errore': 'Non autorizzato'}), 403
+    data = request.json or {}
+    data_str = data.get('data', date.today().strftime('%Y-%m-%d'))
+    result, err = _genera_interno(data_str, 1)
+    if err: return jsonify({'errore': err}), 400
+    result['modalita'] = 'giorno'
+    return jsonify(result)
 
 
 @api.route('/api/genera_programmazione', methods=['POST'])
@@ -916,6 +968,10 @@ if __name__ == '__main__':
                 ]:
                     if col not in cols:
                         conn.execute(text(f"ALTER TABLE dipendente ADD COLUMN {col} {coldef}"))
+                # Migrate turno table
+                turno_cols = [c['name'] for c in inspector.get_columns('turno')]
+                if 'manuale' not in turno_cols:
+                    conn.execute(text("ALTER TABLE turno ADD COLUMN manuale BOOLEAN DEFAULT 0"))
                 # Rename PULIZIE → AUSILIARIO
                 conn.execute(text("UPDATE dipendente SET ruolo='AUSILIARIO' WHERE ruolo='PULIZIE'"))
                 conn.commit()

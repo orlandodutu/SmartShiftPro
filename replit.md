@@ -1,48 +1,81 @@
-# Workspace
+# SmartShift Pro — Gestione Turni Sanitari
 
 ## Overview
 
-pnpm workspace monorepo using TypeScript. Each package manages its own dependencies.
-Also includes a Python Flask web application for shift management (Gestione Turni).
+pnpm workspace monorepo (TypeScript) + Python Flask PWA for healthcare shift management.
 
 ## Stack
 
 - **Monorepo tool**: pnpm workspaces
-- **Node.js version**: 24
-- **Package manager**: pnpm
-- **TypeScript version**: 5.9
-- **API framework**: Express 5
-- **Database**: PostgreSQL + Drizzle ORM
-- **Validation**: Zod (`zod/v4`), `drizzle-zod`
-- **API codegen**: Orval (from OpenAPI spec)
-- **Build**: esbuild (CJS bundle)
+- **Frontend**: React + Vite (TypeScript), dark navy + gold glassmorphism theme
+- **Backend**: Python Flask + SQLAlchemy + SQLite
+- **Port routing**: Flask on 5000 → proxied at `/flask-api`; React Vite dev server at `/`
+- **PDF exports**: reportlab
 
 ## Flask App — Gestione Turni
 
-A Python Flask shift management system for a healthcare team.
+- **Location**: `flask-app/app.py` (≈950 lines)
+- **Database**: `flask-app/gestione_turni.db` (SQLite)
+- **Workflow**: "artifacts/api-server: Flask API"
 
-- **Location**: `flask-app/`
-- **Port**: 5000
-- **Workflow**: "Gestione Turni"
-- **Database**: SQLite (`flask-app/gestione_turni.db`)
-- **Dependencies**: flask, flask-cors, flask-sqlalchemy, reportlab
+### Models
+- `Dipendente` — staff with role, stats, preferences, admin flag, password_changed
+- `Turno` — shift with tipo, ore, manuale flag (locked from regen), data
+- `Assenza` — sick/vacation periods per employee (MALATTIA | FERIE)
+- `RichiestaScambio` — swap requests between staff
 
-### Features
-- Login system (default password: `password123`)
-- Dashboard with personal stats (ore, notti, ferie, malattia)
-- Shift management (add/delete shifts by type: MATTINO, POMERIGGIO, NOTTE, FERIE, MALATTIA, RIPOSO)
-- Staff management (admin only — Orlando)
-- PDF report generation per month
+### Shift Types
+MATTINO (7h), POMERIGGIO (7h), NOTTE (10h), SMONTO (0h), FERIE (0h), MALATTIA (0h), RIPOSO (0h)
 
-### Staff
-Orlando (DEV, admin), Fabiana/Marina/Angela (PULIZIE), Carmen/Roberto/Barbara/Vittoria/Stefania 2/Stefania/Ioana/Elena (OSS), Anna (INFERMIERA)
+### Generation Rules
+- **Admin (Orlando, is_admin=True)**: Fixed MATTINO 07:00–14:00, RIPOSO every Sunday
+- **Infermiera (Anna)**: MATTINO only, RIPOSO alternating Sat/Sun
+- **OSS**: Full rotation — min 3 MATTINO, 2 POMERIGGIO, 1 NOTTE per day
+  - Night eligibility = `'NOTTE' in preferenze_turno`
+  - Chain: NOTTE → SMONTO next day → RIPOSO day after
+- **Ausiliario**: 07:00–15:00 (8h), min 1/day, never counted for OSS coverage
+- **Absences**: Pre-assigned MALATTIA/FERIE shifts exclude staff from coverage
+- **Locked shifts**: `manuale=True` turni are never overwritten by generator
 
-## Key Commands
+### API Endpoints (all at /flask-api/api/...)
+- Auth: `/login`, `/logout`, `/me`, `/change_password`, `/online`
+- Staff: `/dipendenti` CRUD, `/dipendenti/:id/preferenze`
+- Turni: GET/POST `/turni`, PUT/DELETE `/turni/:id`, POST `/turni/genera`, POST `/turni/genera_giorno`
+- Assenze: GET/POST `/assenze`, DELETE `/assenze/:id`
+- Scambi: GET/POST `/scambi`, PUT `/scambi/:id/gestisci`
+- Reports: GET `/genera_report_mensile`
+- Stats: GET `/statistiche`
 
-- `pnpm run typecheck` — full typecheck across all packages
-- `pnpm run build` — typecheck + build all packages
-- `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from OpenAPI spec
-- `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
-- `pnpm --filter @workspace/api-server run dev` — run API server locally
+## React App
 
-See the `pnpm-workspace` skill for workspace structure, TypeScript setup, and package details.
+- **Location**: `artifacts/gestione-turni-react/src/`
+- **Workflow**: "artifacts/gestione-turni-react: web"
+
+### Pages
+- `/login` — Login
+- `/dashboard` — Personal stats + staff table (admin/Caposala can click staff to manage preferences & assenze)
+- `/turni` — Day-grouped shift list; 🔒 icon for manuale shifts; admin inline edit
+- `/genera` — Generate shifts: Giorno Singolo | Settimana | Mese
+- `/griglia` — **NEW** Weekly/monthly pivot grid (Admin + Caposala only); compact MAT/POM/NOT/SMO/FER/MAL/RIP cells
+- `/scambi` — Swap requests
+- `/caposala` — Caposala management area
+- `/monitor` — Admin-only online monitoring (30s polling)
+
+### Key Components
+- `ShiftBadge` — badge for all 7 shift types incl. SMONTO (violet)
+- `RoleBadge` — compact abbreviated labels: OSS, INF, AUS, CAP, DEV
+- `AppLayout` — sidebar nav; Griglia shown for Admin + Caposala
+
+## Staff
+
+**Admin**: Orlando (is_admin=True, DEV role)
+**Infermiera**: Anna
+**OSS**: Carmen, Elena, Barbara (night-eligible), Vittoria, Stefania, Ioana, Roberto, Stefania 2
+**Ausiliario**: Fabiana, Marina, Angela
+**Caposala**: Caposala
+
+Default passwords: `[name]password123`, Caposala: `caposala123`
+
+## DB Migrations (auto-run on startup)
+Handled in `__main__` block via `ALTER TABLE` + `db.create_all()`.
+Added columns: `preferenze_turno`, `password_changed`, `last_login`, `last_seen` (dipendente); `manuale` (turno); `assenza` table.

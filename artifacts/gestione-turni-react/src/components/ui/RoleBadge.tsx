@@ -11,17 +11,17 @@ const ROLE_COLORS: Record<Ruolo, string> = {
 
 const ROLE_LABELS: Record<Ruolo, string> = {
   OSS:        "OSS",
-  INFERMIERA: "Infermiera",
-  AUSILIARIO: "Ausiliario/a",
-  DEV:        "Dev",
-  CAPOSALA:   "Caposala",
+  INFERMIERA: "INF",
+  AUSILIARIO: "AUS",
+  DEV:        "DEV",
+  CAPOSALA:   "CAP",
 };
 
 export function RoleBadge({ role, className = "" }: { role: Ruolo | string; className?: string }) {
   const colorClass = ROLE_COLORS[role as Ruolo] || "bg-slate-500/15 text-slate-300 border-slate-500/30";
   const label = ROLE_LABELS[role as Ruolo] || role;
   return (
-    <Badge variant="outline" className={`${colorClass} font-medium ${className}`}>
+    <Badge variant="outline" className={`${colorClass} font-medium text-[10px] px-1.5 py-0 ${className}`}>
       {label}
     </Badge>
   );

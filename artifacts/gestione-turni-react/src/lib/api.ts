@@ -15,7 +15,14 @@ export type Dipendente = {
   last_seen: string;
 };
 
-export type TipoTurno = 'MATTINO' | 'POMERIGGIO' | 'NOTTE' | 'FERIE' | 'MALATTIA' | 'RIPOSO';
+export type TipoTurno =
+  | 'MATTINO'
+  | 'POMERIGGIO'
+  | 'NOTTE'
+  | 'SMONTO'
+  | 'FERIE'
+  | 'MALATTIA'
+  | 'RIPOSO';
 
 export type Turno = {
   id: number;
@@ -26,6 +33,7 @@ export type Turno = {
   tipo: TipoTurno;
   ore: number;
   note: string;
+  manuale: boolean;
 };
 
 export type Assenza = {

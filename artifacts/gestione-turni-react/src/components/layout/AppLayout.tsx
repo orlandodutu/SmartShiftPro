@@ -1,7 +1,7 @@
 import { ReactNode } from "react";
 import { Link, useLocation } from "wouter";
 import { useAuth } from "@/contexts/AuthContext";
-import { CalendarDays, LayoutDashboard, Shuffle, Wand2, LogOut, ShieldAlert, Activity } from "lucide-react";
+import { CalendarDays, LayoutDashboard, Shuffle, Wand2, LogOut, ShieldAlert, Activity, LayoutGrid } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { RoleBadge } from "@/components/ui/RoleBadge";
 import type { Ruolo } from "@/lib/api";
@@ -36,6 +36,9 @@ export function AppLayout({ children }: { children: ReactNode }) {
     { href: "/genera",    label: "Genera Turni",  icon: Wand2           },
   ];
 
+  if (user?.ruolo === "CAPOSALA" || user?.is_admin) {
+    navItems.push({ href: "/griglia", label: "Griglia",       icon: LayoutGrid  });
+  }
   if (user?.ruolo === "CAPOSALA") {
     navItems.push({ href: "/caposala", label: "Area Caposala", icon: ShieldAlert });
   }
