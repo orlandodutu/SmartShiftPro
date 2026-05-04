@@ -566,13 +566,45 @@ def _genera_interno(data_inizio_str, giorni):
     generati = 0
     saltati  = 0
 
+    # ── Weekly trackers (per calendar week, keyed by Monday date string) ──
+    # oss_riposi_week: (dip_id, cal_week) -> True  — already received RIPOSO this week
+    # oss_notti_week:  (dip_id, cal_week) -> True  — already did NOTTE this week
+    # aus_riposi_week: (dip_id, cal_week) -> True
+    oss_riposi_week: dict = {}
+    oss_notti_week:  dict = {}
+    aus_riposi_week: dict = {}
+    last_cal_week:   str  = ''
+
     for i in range(giorni):
         giorno   = data_inizio + timedelta(days=i)
         data_str = giorno.strftime('%Y-%m-%d')
         ieri_str = (giorno - timedelta(days=1)).strftime('%Y-%m-%d')
         weekday  = giorno.weekday()  # 0=Mon…6=Sun
 
-        # IDs with any existing shift today (manuale or not)
+        # Calendar-week key: Monday of the current week
+        cal_monday = giorno - timedelta(days=weekday)
+        cal_week   = cal_monday.strftime('%Y-%m-%d')
+        cal_sunday = (cal_monday + timedelta(days=6)).strftime('%Y-%m-%d')
+
+        # On entering a new calendar week: load existing RIPOSO/NOTTE from DB.
+        # This ensures single-day generation also respects pre-existing turni.
+        if cal_week != last_cal_week:
+            last_cal_week = cal_week
+            for r in Turno.query.filter(
+                Turno.tipo == 'RIPOSO',
+                Turno.data >= cal_week,
+                Turno.data <= cal_sunday,
+            ).all():
+                oss_riposi_week[(r.dipendente_id, cal_week)] = True
+                aus_riposi_week[(r.dipendente_id, cal_week)] = True
+            for r in Turno.query.filter(
+                Turno.tipo == 'NOTTE',
+                Turno.data >= cal_week,
+                Turno.data <= cal_sunday,
+            ).all():
+                oss_notti_week[(r.dipendente_id, cal_week)] = True
+
+        # IDs with any existing shift today
         gia = {t.dipendente_id for t in Turno.query.filter_by(data=data_str).all()}
 
         # Active absences for this day
@@ -627,52 +659,121 @@ def _genera_interno(data_inizio_str, giorni):
             else:
                 crea(dip, 'MATTINO', 7)
 
-        # ── 3. OSS Night chain: SMONTO and RIPOSO from yesterday ──
+        # ── 3. OSS Night chain: SMONTO (SMONTO alone; post-SMONTO RIPOSO in section 4) ──
         for dip in all_oss:
             if dip.id in gia: continue
             if dip.id in notte_ieri:
                 crea(dip, 'SMONTO')
-            elif dip.id in smonto_ieri:
-                crea(dip, 'RIPOSO')
+            # Note: day-after-SMONTO rest is handled via urgency in section 4 below
 
-        # Assign tonight's NOTTE: 1 night-eligible OSS not yet assigned
+        # ── 3b. NOTTE assignment: prefer OSS who haven't done NOTTE this week ──
+        assigned_notte = False
         for offset in range(len(oss_notturni)):
             candidate = oss_notturni[(i + offset) % len(oss_notturni)]
-            if candidate.id not in gia and candidate.id not in assenti_ids:
-                crea(candidate, 'NOTTE')
-                break
+            if candidate.id in gia or candidate.id in assenti_ids:
+                continue
+            if oss_notti_week.get((candidate.id, cal_week), False):
+                continue  # Prefer fresh candidate
+            if crea(candidate, 'NOTTE'):
+                oss_notti_week[(candidate.id, cal_week)] = True
+            assigned_notte = True
+            break
+        if not assigned_notte:
+            for offset in range(len(oss_notturni)):
+                candidate = oss_notturni[(i + offset) % len(oss_notturni)]
+                if candidate.id not in gia and candidate.id not in assenti_ids:
+                    if crea(candidate, 'NOTTE'):
+                        oss_notti_week[(candidate.id, cal_week)] = True
+                    break
 
-        # ── 4. Remaining OSS: M≥3, P≥2, rest RIPOSO ──
+        # ── 4. Remaining OSS: urgency-based exactly 1 RIPOSO per calendar week ──
+        #
+        # Strategy: each OSS has a designated rest weekday = (rank + week_num_local) % 7.
+        # Additionally, on the last day of the week (Sunday / last generation day),
+        # anyone who still hasn't rested is forced to rest (urgency = 1).
+        # Post-SMONTO rest: OSS who had SMONTO yesterday need today as their RIPOSO.
+        #
+        week_num_local = i // 7
+        is_last_day_of_week = (weekday == 6) or (i == giorni - 1)
         n = len(all_oss)
-        oss_liberi = sorted(
-            [d for d in all_oss if d.id not in gia and d.id not in assenti_ids],
-            key=lambda d: (all_oss.index(d) + i) % n if n else 0
-        )
-        m_c = p_c = 0
+        oss_liberi = [d for d in all_oss if d.id not in gia and d.id not in assenti_ids]
+
+        oss_must_rest  = []  # must rest today (designated day, post-SMONTO, or last day)
+        oss_may_rest   = []  # haven't rested yet but can wait
+        oss_rested     = []  # already have their RIPOSO this week
+
         for dip in oss_liberi:
+            ha_riposato  = oss_riposi_week.get((dip.id, cal_week), False)
+            if ha_riposato:
+                oss_rested.append(dip)
+                continue
+            p_rank        = all_oss.index(dip)
+            rest_weekday  = (p_rank + week_num_local) % 7
+            is_post_smonto = dip.id in smonto_ieri  # day after SMONTO → mandatory rest
+            if is_post_smonto or weekday == rest_weekday or is_last_day_of_week:
+                oss_must_rest.append(dip)
+            else:
+                oss_may_rest.append(dip)
+
+        # Fill coverage slots from rested + may_rest first (workers)
+        workers = oss_rested + oss_may_rest
+        workers.sort(key=lambda d: (all_oss.index(d) + i) % n if n else 0)
+
+        m_c = p_c = 0
+        for dip in workers:
             if m_c < 3:
-                crea(dip, 'MATTINO');  m_c += 1
+                crea(dip, 'MATTINO');    m_c += 1
             elif p_c < 2:
                 crea(dip, 'POMERIGGIO'); p_c += 1
             else:
-                crea(dip, 'RIPOSO')
+                crea(dip, 'MATTINO');    m_c += 1
 
-        # ── 5. Ausiliari: 07–15 (8h), separate from OSS, min 1/day ──
-        aus_libere = [d for d in ausiliari if d.id not in gia and d.id not in assenti_ids]
-        n_aus = len(ausiliari)
-        aus_in_turno = 0
-        for idx, dip in enumerate(aus_libere):
-            orig_idx = ausiliari.index(dip)
-            slot = (orig_idx + i) % n_aus if n_aus > 0 else 0
-            should_work = slot < (n_aus - 1) if n_aus > 1 else True
-            if aus_in_turno == 0 and idx == len(aus_libere) - 1:
-                should_work = True
-            if should_work:
-                ora = AUSILIARIO_ORARI.get(dip.nome, '07:00')
-                crea(dip, 'MATTINO', AUSILIARIO_ORE, ora_inizio=ora)
-                aus_in_turno += 1
+        # Pull from must_rest if minimum coverage still not met
+        for dip in list(oss_must_rest):
+            if m_c < 3:
+                oss_must_rest.remove(dip)
+                crea(dip, 'MATTINO');    m_c += 1
+            elif p_c < 2:
+                oss_must_rest.remove(dip)
+                crea(dip, 'POMERIGGIO'); p_c += 1
             else:
-                crea(dip, 'RIPOSO')
+                break
+
+        # Assign RIPOSO to must-rest OSS (post-SMONTO OR designated day OR last day)
+        for dip in oss_must_rest:
+            crea(dip, 'RIPOSO')
+            oss_riposi_week[(dip.id, cal_week)] = True
+
+        # ── 5. Ausiliari: 07–15 (8h), urgency-based exactly 1 RIPOSO per calendar week ──
+        n_aus = len(ausiliari)
+        aus_libere = [d for d in ausiliari if d.id not in gia and d.id not in assenti_ids]
+
+        aus_must_rest = []
+        aus_workers   = []
+
+        for dip in aus_libere:
+            ha_riposato  = aus_riposi_week.get((dip.id, cal_week), False)
+            if ha_riposato:
+                aus_workers.append(dip)
+                continue
+            p_rank       = ausiliari.index(dip)
+            rest_weekday = (p_rank + week_num_local) % 7
+            if weekday == rest_weekday or is_last_day_of_week:
+                aus_must_rest.append(dip)
+            else:
+                aus_workers.append(dip)
+
+        # Ensure at least 1 ausiliario works each day
+        if not aus_workers and aus_must_rest:
+            aus_workers.append(aus_must_rest.pop())
+
+        for dip in aus_workers:
+            ora = AUSILIARIO_ORARI.get(dip.nome, '07:00')
+            crea(dip, 'MATTINO', AUSILIARIO_ORE, ora_inizio=ora)
+
+        for dip in aus_must_rest:
+            crea(dip, 'RIPOSO')
+            aus_riposi_week[(dip.id, cal_week)] = True
 
         db.session.commit()
 
