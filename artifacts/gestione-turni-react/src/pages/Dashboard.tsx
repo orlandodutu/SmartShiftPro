@@ -58,6 +58,27 @@ export default function Dashboard() {
   const [dipendenti, setDipendenti] = useState<Dipendente[]>([]);
   const [tutteAssenze, setTutteAssenze] = useState<Assenza[]>([]);
 
+  /* Delete dipendente */
+  const [deleteTarget, setDeleteTarget] = useState<Dipendente | null>(null);
+  const [deleteLoading, setDeleteLoading] = useState(false);
+  const handleDeleteDip = async () => {
+    if (!deleteTarget) return;
+    setDeleteLoading(true);
+    try {
+      const res = await fetch(`/flask-api/api/dipendenti/${deleteTarget.id}`, {
+        method: "DELETE", credentials: "include",
+      });
+      if (res.ok) {
+        toast({ title: `${deleteTarget.nome} eliminato` });
+        setDeleteTarget(null);
+        await fetchData();
+      } else {
+        const err = await res.json();
+        toast({ title: err.errore || "Errore", variant: "destructive" });
+      }
+    } finally { setDeleteLoading(false); }
+  };
+
   /* Reset completo */
   const [resetOpen, setResetOpen] = useState(false);
   const [resetLoading, setResetLoading] = useState(false);
@@ -344,12 +365,14 @@ export default function Dashboard() {
                     <TableRow className="border-white/5 hover:bg-transparent">
                       <TableHead className="pl-6 text-muted-foreground text-xs">Nome</TableHead>
                       <TableHead className="text-muted-foreground text-xs">Stato</TableHead>
-                      <TableHead className="text-right pr-6 text-muted-foreground text-xs">Ore</TableHead>
+                      <TableHead className="text-right pr-2 text-muted-foreground text-xs">Ore</TableHead>
+                      {user?.is_admin && <TableHead className="w-8 pr-3" />}
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {stats.slice().filter(d => d.ruolo !== 'CAPOSALA').sort((a, b) => b.ore_totali - a.ore_totali).map((dip) => {
                       const absence = canManage ? getAbsenceToday(dip.id) : undefined;
+                      const canDelete = user?.is_admin && !dip.is_admin && dip.id !== user?.id;
                       return (
                         <TableRow
                           key={dip.id}
@@ -379,7 +402,22 @@ export default function Dashboard() {
                               <span className="text-[9px] font-semibold text-emerald-400/70 bg-emerald-500/8 border border-emerald-500/15 px-1.5 py-0.5 rounded">Attivo</span>
                             )}
                           </TableCell>
-                          <TableCell className="text-right pr-6 font-mono text-sm text-gold font-bold">{dip.ore_totali}</TableCell>
+                          <TableCell className="text-right pr-2 font-mono text-sm text-gold font-bold">{dip.ore_totali}</TableCell>
+                          {user?.is_admin && (
+                            <TableCell className="pr-3 w-8">
+                              {canDelete && (
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-6 w-6 text-red-400/30 hover:text-red-400 hover:bg-red-500/10"
+                                  onClick={(e) => { e.stopPropagation(); setDeleteTarget(dip); }}
+                                  data-testid={`dash-delete-${dip.id}`}
+                                >
+                                  <Trash2 className="h-3 w-3" />
+                                </Button>
+                              )}
+                            </TableCell>
+                          )}
                         </TableRow>
                       );
                     })}
@@ -549,6 +587,45 @@ export default function Dashboard() {
                     })}
                   </div>
                 )}
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Delete Dipendente Dialog ── */}
+      <Dialog open={!!deleteTarget} onOpenChange={(open) => !open && !deleteLoading && setDeleteTarget(null)}>
+        <DialogContent className="glass-strong border-white/10 max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-red-400">
+              <Trash2 className="h-5 w-5" />
+              Elimina Dipendente
+            </DialogTitle>
+          </DialogHeader>
+          {deleteTarget && (
+            <div className="space-y-4">
+              <div className="rounded-xl bg-red-500/8 border border-red-500/20 p-4 space-y-2">
+                <p className="text-sm font-semibold text-foreground">
+                  Stai per eliminare <span className="text-red-300">{deleteTarget.nome}</span>
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  Questa azione è <strong className="text-red-400">irreversibile</strong>. Verranno eliminati:
+                </p>
+                <ul className="text-xs text-muted-foreground space-y-0.5 ml-3">
+                  <li>• Tutti i turni assegnati</li>
+                  <li>• Tutte le richieste di scambio</li>
+                  <li>• Tutte le assenze registrate</li>
+                  <li>• L'accesso all'app</li>
+                </ul>
+              </div>
+              <div className="flex gap-3">
+                <Button variant="outline" className="flex-1 border-white/10 hover:bg-white/5" onClick={() => setDeleteTarget(null)} disabled={deleteLoading}>
+                  Annulla
+                </Button>
+                <Button className="flex-1 bg-red-600 hover:bg-red-500 text-white gap-2" onClick={handleDeleteDip} disabled={deleteLoading}>
+                  <Trash2 className="h-4 w-4" />
+                  {deleteLoading ? "Eliminazione..." : "Elimina"}
+                </Button>
               </div>
             </div>
           )}
