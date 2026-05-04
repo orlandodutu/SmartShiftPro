@@ -282,13 +282,24 @@ def get_dipendenti():
 
 @api.route('/api/dipendenti', methods=['POST'])
 def aggiungi_dipendente():
+    if 'user_id' not in session:
+        return jsonify({'errore': 'Non autenticato'}), 401
+    me = db.session.get(Dipendente, session['user_id'])
+    if not me or not (me.is_admin or me.ruolo == 'CAPOSALA'):
+        return jsonify({'errore': 'Non autorizzato'}), 403
     data = request.json
-    if Dipendente.query.filter_by(nome=data['nome']).first():
+    nome = str(data.get('nome', '')).strip()[:50]
+    ruolo = str(data.get('ruolo', 'OSS'))
+    if not nome:
+        return jsonify({'errore': 'Nome obbligatorio'}), 400
+    if Dipendente.query.filter_by(nome=nome).first():
         return jsonify({'errore': 'Nome già esistente'}), 400
     nuovo = Dipendente(
-        nome=data['nome'],
-        ruolo=data['ruolo'],
-        password=data.get('password', 'password123')
+        nome=nome,
+        ruolo=ruolo,
+        password='password123',
+        password_changed=False,
+        preferenze_turno='MATTINO,POMERIGGIO,NOTTE',
     )
     db.session.add(nuovo)
     db.session.commit()
@@ -297,11 +308,21 @@ def aggiungi_dipendente():
 
 @api.route('/api/dipendenti/<int:id>', methods=['PUT'])
 def aggiorna_dipendente(id):
+    if 'user_id' not in session:
+        return jsonify({'errore': 'Non autenticato'}), 401
+    me = db.session.get(Dipendente, session['user_id'])
+    if not me or not (me.is_admin or me.ruolo == 'CAPOSALA'):
+        return jsonify({'errore': 'Non autorizzato'}), 403
     d = Dipendente.query.get_or_404(id)
+    # Caposala cannot edit other admins
+    if not me.is_admin and d.is_admin:
+        return jsonify({'errore': 'Non autorizzato'}), 403
     data = request.json
-    for field in ['ruolo', 'password', 'ferie', 'malattia']:
+    for field in ['ruolo', 'password', 'ferie', 'malattia', 'preferenze_turno']:
         if field in data:
             setattr(d, field, data[field])
+    if 'password_changed' in data:
+        d.password_changed = bool(data['password_changed'])
     db.session.commit()
     return jsonify(d.to_dict(include_phone=True))
 

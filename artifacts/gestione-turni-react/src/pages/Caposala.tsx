@@ -4,21 +4,33 @@ import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { RoleBadge } from "@/components/ui/RoleBadge";
 import { ShiftBadge } from "@/components/ui/ShiftBadge";
-import { Check, X, CalendarRange, Calendar, ShieldAlert, ArrowLeftRight, MessageCircle } from "lucide-react";
+import {
+  Check, X, CalendarRange, Calendar, ShieldAlert, ArrowLeftRight,
+  MessageCircle, UserPlus, Pencil, KeyRound, Phone, Users, Copy,
+} from "lucide-react";
 
 const CRYSTAL = "linear-gradient(155deg, #B8860B 0%, #FFBF00 38%, #FFE566 52%, #FFBF00 75%, #B8860B 100%)";
 const WA_GREEN = "linear-gradient(135deg, #128C7E, #25D366)";
+
+const RUOLI = ["OSS", "INFERMIERA", "AUSILIARIO", "CAPOSALA"] as const;
 
 interface ApprovedInfo {
   richiedente_nome: string;
   richiedente_telefono: string;
   destinatario_nome: string;
   destinatario_telefono: string;
+}
+
+interface CreatedCreds {
+  nome: string;
+  ruolo: string;
 }
 
 function waMsg(nome: string, altro: string) {
@@ -30,33 +42,49 @@ function waMsg(nome: string, altro: string) {
 export default function Caposala() {
   const { user } = useAuth();
   const { toast } = useToast();
-  const [richieste, setRichieste] = useState<RichiestaScambio[]>([]);
-  const [dipendenti, setDipendenti] = useState<Dipendente[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [genLoading, setGenLoading] = useState<"settimana" | "mese" | null>(null);
 
+  // Swap state
+  const [richieste, setRichieste] = useState<RichiestaScambio[]>([]);
+  const [loadingRichieste, setLoadingRichieste] = useState(true);
+  const [genLoading, setGenLoading] = useState<"settimana" | "mese" | null>(null);
   const [activeRequest, setActiveRequest] = useState<RichiestaScambio | null>(null);
   const [notaCaposala, setNotaCaposala] = useState("");
   const [azione, setAzione] = useState<"approva" | "rifiuta">("approva");
   const [actionLoading, setActionLoading] = useState(false);
   const [approvedInfo, setApprovedInfo] = useState<ApprovedInfo | null>(null);
 
+  // Staff management state
+  const [dipendenti, setDipendenti] = useState<Dipendente[]>([]);
+  const [showAdd, setShowAdd] = useState(false);
+  const [nuovoNome, setNuovoNome] = useState("");
+  const [nuovoRuolo, setNuovoRuolo] = useState("OSS");
+  const [addLoading, setAddLoading] = useState(false);
+  const [createdCreds, setCreatedCreds] = useState<CreatedCreds | null>(null);
+  const [editDip, setEditDip] = useState<Dipendente | null>(null);
+  const [editRuolo, setEditRuolo] = useState("");
+  const [editLoading, setEditLoading] = useState(false);
+
   const fetchRichieste = async () => {
+    setLoadingRichieste(true);
     try {
       const res = await fetch("/flask-api/api/scambi?stato=IN_ATTESA", { credentials: "include" });
       if (res.ok) setRichieste(await res.json());
     } finally {
-      setLoading(false);
+      setLoadingRichieste(false);
     }
   };
 
-  useEffect(() => {
-    fetchRichieste();
+  const fetchDipendenti = () =>
     fetch("/flask-api/api/dipendenti", { credentials: "include" })
       .then((r) => (r.ok ? r.json() : []))
       .then(setDipendenti);
+
+  useEffect(() => {
+    fetchRichieste();
+    fetchDipendenti();
   }, []);
 
+  // ─── Generation ───
   const handleGenera = async (modalita: "settimana" | "mese") => {
     setGenLoading(modalita);
     const today = new Date().toISOString().split("T")[0];
@@ -83,6 +111,7 @@ export default function Caposala() {
     }
   };
 
+  // ─── Swap approval ───
   const openAction = (r: RichiestaScambio, a: "approva" | "rifiuta") => {
     setActiveRequest(r);
     setAzione(a);
@@ -127,6 +156,78 @@ export default function Caposala() {
     }
   };
 
+  // ─── Add dipendente ───
+  const handleAddDipendente = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const nome = nuovoNome.trim();
+    if (!nome) { toast({ title: "Inserisci un nome", variant: "destructive" }); return; }
+    setAddLoading(true);
+    try {
+      const res = await fetch("/flask-api/api/dipendenti", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ nome, ruolo: nuovoRuolo }),
+      });
+      if (res.ok) {
+        setNuovoNome("");
+        setNuovoRuolo("OSS");
+        setShowAdd(false);
+        setCreatedCreds({ nome, ruolo: nuovoRuolo });
+        fetchDipendenti();
+      } else {
+        const err = await res.json();
+        toast({ title: err.errore || "Errore", variant: "destructive" });
+      }
+    } finally {
+      setAddLoading(false);
+    }
+  };
+
+  // ─── Edit dipendente ───
+  const openEdit = (d: Dipendente) => {
+    setEditDip(d);
+    setEditRuolo(d.ruolo);
+  };
+
+  const handleSaveEdit = async () => {
+    if (!editDip) return;
+    setEditLoading(true);
+    try {
+      const res = await fetch(`/flask-api/api/dipendenti/${editDip.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ ruolo: editRuolo }),
+      });
+      if (res.ok) {
+        toast({ title: `${editDip.nome} aggiornato` });
+        setEditDip(null);
+        fetchDipendenti();
+      } else {
+        toast({ title: "Errore", variant: "destructive" });
+      }
+    } finally {
+      setEditLoading(false);
+    }
+  };
+
+  // ─── Reset password ───
+  const handleResetPw = async (d: Dipendente) => {
+    const res = await fetch(`/flask-api/api/dipendenti/${d.id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({ password: "password123", password_changed: false }),
+    });
+    if (res.ok) {
+      toast({ title: `Password di ${d.nome} reimpostata a "password123"` });
+      fetchDipendenti();
+    } else {
+      toast({ title: "Errore reset password", variant: "destructive" });
+    }
+  };
+
   if (user?.ruolo !== "CAPOSALA" && !user?.is_admin) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -139,8 +240,12 @@ export default function Caposala() {
     );
   }
 
+  // Staff list: exclude DEV/Orlando from editable list for caposala (admin can see all)
+  const staffVisibile = dipendenti.filter((d) => user?.is_admin ? true : !d.is_admin);
+
   return (
     <div className="min-h-screen">
+      {/* Header */}
       <div className="bg-yellow-950/40 border-b border-yellow-800/40 px-6 md:px-10 py-8">
         <div className="max-w-5xl mx-auto flex items-center gap-5">
           <div className="h-14 w-14 rounded-2xl bg-yellow-900/60 text-yellow-400 flex items-center justify-center shadow-sm">
@@ -148,13 +253,14 @@ export default function Caposala() {
           </div>
           <div>
             <h1 className="text-2xl font-bold text-foreground">Area Caposala</h1>
-            <p className="text-sm text-yellow-400 font-medium mt-0.5">Gestione turni e approvazione scambi</p>
+            <p className="text-sm text-yellow-400 font-medium mt-0.5">Gestione turni, scambi e staff</p>
           </div>
         </div>
       </div>
 
       <div className="p-6 md:p-10 max-w-5xl mx-auto space-y-10">
-        {/* Auto-generate */}
+
+        {/* ─── Auto-generate ─── */}
         <section>
           <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-widest mb-4">Generazione Automatica Turni</h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -198,17 +304,17 @@ export default function Caposala() {
           </div>
         </section>
 
-        {/* Swap requests */}
+        {/* ─── Swap requests ─── */}
         <section>
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-widest">Richieste in Attesa</h2>
+            <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-widest">Richieste Scambio in Attesa</h2>
             <span className="text-sm font-bold text-foreground bg-white/5 border border-white/10 px-3 py-0.5 rounded-full">
-              {loading ? "—" : richieste.length}
+              {loadingRichieste ? "—" : richieste.length}
             </span>
           </div>
 
           <div className="space-y-4">
-            {loading ? (
+            {loadingRichieste ? (
               <p className="text-sm text-muted-foreground text-center py-10">Caricamento...</p>
             ) : richieste.length === 0 ? (
               <div className="glass rounded-2xl border border-white/8 p-10 text-center">
@@ -293,9 +399,96 @@ export default function Caposala() {
             )}
           </div>
         </section>
+
+        {/* ─── Staff management ─── */}
+        <section>
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2">
+              <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-widest">Gestione Staff</h2>
+              <span className="text-sm font-bold text-foreground bg-white/5 border border-white/10 px-3 py-0.5 rounded-full">
+                {staffVisibile.length}
+              </span>
+            </div>
+            <button
+              onClick={() => { setNuovoNome(""); setNuovoRuolo("OSS"); setShowAdd(true); }}
+              className="flex items-center gap-2 px-4 py-2 rounded-xl font-semibold text-sm glow-gold"
+              style={{ background: CRYSTAL, color: "#0f172a" }}
+              data-testid="btn-aggiungi-dipendente"
+            >
+              <UserPlus className="h-4 w-4" />
+              Aggiungi
+            </button>
+          </div>
+
+          <div className="space-y-2">
+            {staffVisibile.length === 0 ? (
+              <div className="glass rounded-2xl border border-white/8 p-8 text-center">
+                <Users className="h-8 w-8 text-muted-foreground/20 mx-auto mb-3" />
+                <p className="text-muted-foreground">Nessun dipendente trovato</p>
+              </div>
+            ) : (
+              staffVisibile.map((d) => (
+                <div
+                  key={d.id}
+                  className="flex items-center gap-3 px-4 py-3 rounded-xl border border-white/8 bg-white/3 hover:bg-white/6 transition-colors"
+                >
+                  <div className="w-8 h-8 rounded-full bg-white/8 flex items-center justify-center text-xs font-bold text-muted-foreground shrink-0">
+                    {d.nome.charAt(0).toUpperCase()}
+                  </div>
+
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-semibold text-foreground text-sm">{d.nome}</span>
+                      <RoleBadge role={d.ruolo} />
+                      {d.is_admin && (
+                        <span className="text-[9px] font-bold uppercase tracking-widest text-amber-400 bg-amber-500/10 border border-amber-500/20 px-1.5 py-0.5 rounded">
+                          Admin
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-3 mt-0.5">
+                      {d.telefono ? (
+                        <span className="text-xs text-muted-foreground/60 flex items-center gap-1">
+                          <Phone className="h-3 w-3" />
+                          +39 {d.telefono}
+                        </span>
+                      ) : (
+                        <span className="text-xs text-muted-foreground/30">Nessun telefono</span>
+                      )}
+                      {!d.password_changed && (
+                        <span className="text-[9px] text-orange-400/80 bg-orange-500/10 border border-orange-500/20 px-1.5 py-0.5 rounded uppercase tracking-wide font-bold">
+                          Primo accesso
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <button
+                      title="Modifica ruolo"
+                      onClick={() => openEdit(d)}
+                      className="h-8 w-8 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors"
+                      data-testid={`edit-${d.id}`}
+                    >
+                      <Pencil className="h-3.5 w-3.5" />
+                    </button>
+                    <button
+                      title="Reset password a password123"
+                      onClick={() => handleResetPw(d)}
+                      className="h-8 w-8 rounded-lg bg-white/5 hover:bg-amber-500/15 border border-white/10 hover:border-amber-500/30 flex items-center justify-center text-muted-foreground hover:text-amber-400 transition-colors"
+                      data-testid={`reset-pw-${d.id}`}
+                    >
+                      <KeyRound className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </section>
       </div>
 
-      {/* Confirmation Dialog */}
+      {/* ─── Swap confirmation dialog ─── */}
       <Dialog open={!!activeRequest} onOpenChange={(open) => !open && setActiveRequest(null)}>
         <DialogContent className="glass-strong border-white/10 max-w-md">
           <DialogHeader>
@@ -308,11 +501,14 @@ export default function Caposala() {
           <div className="space-y-4">
             {activeRequest && (
               <div className="rounded-xl bg-white/5 border border-white/8 p-3 text-sm text-muted-foreground">
-                Scambio tra <strong className="text-foreground">{activeRequest.richiedente_nome}</strong> e <strong className="text-foreground">{activeRequest.destinatario_nome}</strong>
+                Scambio tra <strong className="text-foreground">{activeRequest.richiedente_nome}</strong> e{" "}
+                <strong className="text-foreground">{activeRequest.destinatario_nome}</strong>
               </div>
             )}
             <div className="space-y-2">
-              <Label className="text-muted-foreground">Nota per lo staff <span className="text-muted-foreground/50 font-normal">(opzionale)</span></Label>
+              <Label className="text-muted-foreground">
+                Nota per lo staff <span className="text-muted-foreground/50 font-normal">(opzionale)</span>
+              </Label>
               <Textarea
                 placeholder={azione === "approva" ? "Es. Ricordate di coprire la mattina..." : "Es. Non è possibile per mancanza di copertura..."}
                 value={notaCaposala}
@@ -340,7 +536,7 @@ export default function Caposala() {
         </DialogContent>
       </Dialog>
 
-      {/* WhatsApp post-approval dialog */}
+      {/* ─── WhatsApp post-approval dialog ─── */}
       <Dialog open={!!approvedInfo} onOpenChange={(open) => !open && setApprovedInfo(null)}>
         <DialogContent className="glass-strong border-white/10 max-w-sm">
           <DialogHeader>
@@ -351,9 +547,7 @@ export default function Caposala() {
           </DialogHeader>
           {approvedInfo && (
             <div className="space-y-3">
-              <p className="text-sm text-muted-foreground">
-                Notifica i dipendenti via WhatsApp:
-              </p>
+              <p className="text-sm text-muted-foreground">Notifica i dipendenti via WhatsApp:</p>
 
               {approvedInfo.richiedente_telefono ? (
                 <a
@@ -391,13 +585,182 @@ export default function Caposala() {
                 </div>
               )}
 
-              <Button
-                variant="outline"
-                className="w-full border-white/10 hover:bg-white/5 mt-2"
-                onClick={() => setApprovedInfo(null)}
-              >
+              <Button variant="outline" className="w-full border-white/10 hover:bg-white/5 mt-2" onClick={() => setApprovedInfo(null)}>
                 Chiudi
               </Button>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* ─── Add dipendente dialog ─── */}
+      <Dialog open={showAdd} onOpenChange={setShowAdd}>
+        <DialogContent className="glass-strong border-white/10 max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-amber-400">
+              <UserPlus className="h-5 w-5" />
+              Aggiungi Dipendente
+            </DialogTitle>
+          </DialogHeader>
+          <form onSubmit={handleAddDipendente} className="space-y-4">
+            <div className="space-y-1.5">
+              <Label className="text-muted-foreground text-xs">Nome completo <span className="text-amber-400">*</span></Label>
+              <Input
+                value={nuovoNome}
+                onChange={(e) => setNuovoNome(e.target.value)}
+                placeholder="Es. Maria Rossi"
+                required
+                className="bg-black/20 border-white/10 focus:border-amber-400"
+                data-testid="nuovo-nome"
+              />
+              <p className="text-[10px] text-muted-foreground/50">
+                Il nome diventa anche lo <strong className="text-muted-foreground/70">username</strong> di accesso
+              </p>
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-muted-foreground text-xs">Ruolo <span className="text-amber-400">*</span></Label>
+              <Select value={nuovoRuolo} onValueChange={setNuovoRuolo}>
+                <SelectTrigger className="bg-black/20 border-white/10" data-testid="nuovo-ruolo">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent className="glass-strong border-white/10">
+                  {RUOLI.map((r) => (
+                    <SelectItem key={r} value={r}>{r}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Credential preview */}
+            <div className="rounded-xl bg-amber-500/8 border border-amber-500/20 p-3 space-y-1">
+              <p className="text-[10px] text-amber-400/70 font-semibold uppercase tracking-wide">Credenziali di accesso iniziali</p>
+              <div className="flex justify-between text-xs">
+                <span className="text-muted-foreground">Username:</span>
+                <span className="font-mono text-foreground">{nuovoNome.trim() || "—"}</span>
+              </div>
+              <div className="flex justify-between text-xs">
+                <span className="text-muted-foreground">Password:</span>
+                <span className="font-mono text-amber-300">password123</span>
+              </div>
+              <p className="text-[10px] text-muted-foreground/50 mt-1">Al primo accesso verrà richiesto di cambiarla</p>
+            </div>
+
+            <div className="flex gap-3">
+              <Button type="button" variant="outline" className="flex-1 border-white/10 hover:bg-white/5" onClick={() => setShowAdd(false)}>
+                Annulla
+              </Button>
+              <button
+                type="submit"
+                disabled={addLoading}
+                className="flex-1 py-2 rounded-xl font-bold text-sm glow-gold disabled:opacity-50"
+                style={{ background: CRYSTAL, color: "#0f172a" }}
+                data-testid="confirm-aggiungi"
+              >
+                {addLoading ? "Salvataggio..." : "Aggiungi"}
+              </button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* ─── Created credentials dialog ─── */}
+      <Dialog open={!!createdCreds} onOpenChange={(open) => !open && setCreatedCreds(null)}>
+        <DialogContent className="glass-strong border-white/10 max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-emerald-400">
+              <Check className="h-5 w-5" />
+              Dipendente Aggiunto!
+            </DialogTitle>
+          </DialogHeader>
+          {createdCreds && (
+            <div className="space-y-4">
+              <p className="text-sm text-muted-foreground">
+                <strong className="text-foreground">{createdCreds.nome}</strong> è stato aggiunto come{" "}
+                <strong className="text-foreground">{createdCreds.ruolo}</strong>.
+              </p>
+
+              <div className="rounded-xl bg-white/5 border border-white/10 overflow-hidden">
+                <div className="px-4 py-2 border-b border-white/10 bg-white/3">
+                  <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Credenziali di accesso</p>
+                </div>
+                <div className="p-4 space-y-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-xs text-muted-foreground">Username</span>
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono text-sm text-foreground">{createdCreds.nome}</span>
+                      <button
+                        onClick={() => { navigator.clipboard.writeText(createdCreds.nome); toast({ title: "Copiato!" }); }}
+                        className="text-muted-foreground/50 hover:text-muted-foreground"
+                      >
+                        <Copy className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-xs text-muted-foreground">Password</span>
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono text-sm text-amber-300">password123</span>
+                      <button
+                        onClick={() => { navigator.clipboard.writeText("password123"); toast({ title: "Copiato!" }); }}
+                        className="text-muted-foreground/50 hover:text-muted-foreground"
+                      >
+                        <Copy className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <p className="text-xs text-muted-foreground/60">
+                Al primo accesso il sistema chiederà di impostare una password personale e il numero di cellulare.
+              </p>
+
+              <Button className="w-full bg-emerald-600 hover:bg-emerald-500 text-white" onClick={() => setCreatedCreds(null)}>
+                Perfetto
+              </Button>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* ─── Edit dipendente dialog ─── */}
+      <Dialog open={!!editDip} onOpenChange={(open) => !open && setEditDip(null)}>
+        <DialogContent className="glass-strong border-white/10 max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-foreground">
+              <Pencil className="h-5 w-5" />
+              Modifica {editDip?.nome}
+            </DialogTitle>
+          </DialogHeader>
+          {editDip && (
+            <div className="space-y-4">
+              <div className="space-y-1.5">
+                <Label className="text-muted-foreground text-xs">Ruolo</Label>
+                <Select value={editRuolo} onValueChange={setEditRuolo}>
+                  <SelectTrigger className="bg-black/20 border-white/10" data-testid="edit-ruolo">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent className="glass-strong border-white/10">
+                    {RUOLI.map((r) => (
+                      <SelectItem key={r} value={r}>{r}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex gap-3">
+                <Button variant="outline" className="flex-1 border-white/10 hover:bg-white/5" onClick={() => setEditDip(null)} disabled={editLoading}>
+                  Annulla
+                </Button>
+                <Button
+                  className="flex-1 bg-blue-600 hover:bg-blue-500 text-white gap-2"
+                  onClick={handleSaveEdit}
+                  disabled={editLoading}
+                  data-testid="confirm-edit"
+                >
+                  <Check className="h-4 w-4" />
+                  {editLoading ? "Salvataggio..." : "Salva"}
+                </Button>
+              </div>
             </div>
           )}
         </DialogContent>
