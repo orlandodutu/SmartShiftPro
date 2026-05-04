@@ -164,7 +164,7 @@ export default function Genera() {
 
             <button type="submit" disabled={loading}
               className="w-full py-3 rounded-xl font-bold text-sm uppercase tracking-wide glow-gold transition-all disabled:opacity-50 flex items-center justify-center gap-2"
-              style={{ background: "linear-gradient(135deg, #f59e0b, #d97706)", color: "#0f172a" }}
+              style={{ background: "linear-gradient(155deg, #B8860B 0%, #FFBF00 38%, #FFE566 52%, #FFBF00 75%, #B8860B 100%)", color: "#0f172a" }}
               data-testid="btn-genera">
               <Wand2 className="h-4 w-4" />
               {loading ? "Generazione in corso..." : `Genera ${MODALITA_LABELS[modalita]}`}

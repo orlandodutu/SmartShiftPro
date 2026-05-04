@@ -13,6 +13,7 @@ export type Dipendente = {
   password_changed: boolean;
   last_login: string;
   last_seen: string;
+  telefono: string;
 };
 
 export type TipoTurno =

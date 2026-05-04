@@ -18,16 +18,18 @@ import { AppLayout } from "@/components/layout/AppLayout";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
-import { KeyRound, ShieldCheck } from "lucide-react";
+import { KeyRound, ShieldCheck, Phone } from "lucide-react";
 
 const queryClient = new QueryClient();
+const CRYSTAL = "linear-gradient(155deg, #B8860B 0%, #FFBF00 38%, #FFE566 52%, #FFBF00 75%, #B8860B 100%)";
 
-/* ── First-login password change modal ── */
+/* ── First-login password + phone modal ── */
 function PasswordChangeModal() {
   const { user, updateUser } = useAuth();
   const { toast } = useToast();
   const [pw, setPw] = useState("");
   const [pw2, setPw2] = useState("");
+  const [telefono, setTelefono] = useState("");
   const [loading, setLoading] = useState(false);
 
   if (!user || user.password_changed) return null;
@@ -35,10 +37,14 @@ function PasswordChangeModal() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (pw.length < 6) {
-      toast({ title: "Minimo 6 caratteri", variant: "destructive" }); return;
+      toast({ title: "Minimo 6 caratteri per la password", variant: "destructive" }); return;
     }
     if (pw !== pw2) {
       toast({ title: "Le password non coincidono", variant: "destructive" }); return;
+    }
+    const tel = telefono.replace(/\D/g, "").replace(/^(39|0039)/, "");
+    if (tel.length < 9) {
+      toast({ title: "Numero di cellulare non valido (min. 9 cifre)", variant: "destructive" }); return;
     }
     setLoading(true);
     try {
@@ -46,12 +52,12 @@ function PasswordChangeModal() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({ new_password: pw }),
+        body: JSON.stringify({ new_password: pw, telefono: tel }),
       });
       if (res.ok) {
         const updated = await res.json();
         updateUser(updated);
-        toast({ title: "Password aggiornata con successo" });
+        toast({ title: "Profilo aggiornato con successo" });
       } else {
         const err = await res.json();
         toast({ title: err.errore || "Errore", variant: "destructive" });
@@ -67,9 +73,9 @@ function PasswordChangeModal() {
         <div className="mb-6 inline-flex items-center justify-center h-14 w-14 rounded-2xl bg-amber-500/15 text-amber-400 mx-auto">
           <KeyRound className="h-7 w-7" />
         </div>
-        <h2 className="text-xl font-bold text-foreground mb-1">Imposta la tua Password</h2>
+        <h2 className="text-xl font-bold text-foreground mb-1">Configura il tuo Profilo</h2>
         <p className="text-sm text-muted-foreground mb-6">
-          Benvenuto/a <strong className="text-foreground">{user.nome}</strong>! Per la sicurezza, scegli una password personale prima di continuare.
+          Benvenuto/a <strong className="text-foreground">{user.nome}</strong>! Scegli una password e inserisci il tuo cellulare per le notifiche scambio turno.
         </p>
         <form onSubmit={handleSubmit} className="space-y-3 text-left">
           <div className="space-y-1.5">
@@ -95,11 +101,31 @@ function PasswordChangeModal() {
               className="bg-black/20 border-white/10 focus:border-amber-400"
             />
           </div>
+          <div className="space-y-1.5">
+            <Label className="text-muted-foreground text-xs flex items-center gap-1.5">
+              <Phone className="h-3 w-3" />
+              Numero di cellulare
+            </Label>
+            <div className="flex gap-2 items-center">
+              <span className="text-sm text-muted-foreground bg-black/20 border border-white/10 rounded-lg px-3 h-9 flex items-center shrink-0">
+                +39
+              </span>
+              <Input
+                type="tel"
+                value={telefono}
+                onChange={(e) => setTelefono(e.target.value)}
+                placeholder="3331234567"
+                required
+                className="bg-black/20 border-white/10 focus:border-amber-400 flex-1"
+              />
+            </div>
+            <p className="text-[10px] text-muted-foreground/60">Usato solo dalla Caposala per notifiche scambio turno</p>
+          </div>
           <button
             type="submit"
             disabled={loading}
             className="w-full mt-2 py-3 rounded-xl font-bold text-sm uppercase tracking-widest glow-gold disabled:opacity-50 flex items-center justify-center gap-2"
-            style={{ background: "linear-gradient(135deg, #f59e0b, #d97706)", color: "#0f172a" }}
+            style={{ background: CRYSTAL, color: "#0f172a" }}
           >
             <ShieldCheck className="h-4 w-4" />
             {loading ? "Salvataggio..." : "Salva e Continua"}

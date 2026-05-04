@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { RichiestaScambio } from "@/lib/api";
+import { RichiestaScambio, Dipendente } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -9,12 +9,29 @@ import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { RoleBadge } from "@/components/ui/RoleBadge";
 import { ShiftBadge } from "@/components/ui/ShiftBadge";
-import { Check, X, CalendarRange, Calendar, ShieldAlert, ArrowLeftRight } from "lucide-react";
+import { Check, X, CalendarRange, Calendar, ShieldAlert, ArrowLeftRight, MessageCircle } from "lucide-react";
+
+const CRYSTAL = "linear-gradient(155deg, #B8860B 0%, #FFBF00 38%, #FFE566 52%, #FFBF00 75%, #B8860B 100%)";
+const WA_GREEN = "linear-gradient(135deg, #128C7E, #25D366)";
+
+interface ApprovedInfo {
+  richiedente_nome: string;
+  richiedente_telefono: string;
+  destinatario_nome: string;
+  destinatario_telefono: string;
+}
+
+function waMsg(nome: string, altro: string) {
+  return encodeURIComponent(
+    `SmartShift Pro: Ciao ${nome}! Il cambio turno con ${altro} è stato approvato dalla Caposala. Buon lavoro! 🌟`
+  );
+}
 
 export default function Caposala() {
   const { user } = useAuth();
   const { toast } = useToast();
   const [richieste, setRichieste] = useState<RichiestaScambio[]>([]);
+  const [dipendenti, setDipendenti] = useState<Dipendente[]>([]);
   const [loading, setLoading] = useState(true);
   const [genLoading, setGenLoading] = useState<"settimana" | "mese" | null>(null);
 
@@ -22,6 +39,7 @@ export default function Caposala() {
   const [notaCaposala, setNotaCaposala] = useState("");
   const [azione, setAzione] = useState<"approva" | "rifiuta">("approva");
   const [actionLoading, setActionLoading] = useState(false);
+  const [approvedInfo, setApprovedInfo] = useState<ApprovedInfo | null>(null);
 
   const fetchRichieste = async () => {
     try {
@@ -32,7 +50,12 @@ export default function Caposala() {
     }
   };
 
-  useEffect(() => { fetchRichieste(); }, []);
+  useEffect(() => {
+    fetchRichieste();
+    fetch("/flask-api/api/dipendenti", { credentials: "include" })
+      .then((r) => (r.ok ? r.json() : []))
+      .then(setDipendenti);
+  }, []);
 
   const handleGenera = async (modalita: "settimana" | "mese") => {
     setGenLoading(modalita);
@@ -84,6 +107,16 @@ export default function Caposala() {
               ? `Approvato tra ${activeRequest.richiedente_nome} e ${activeRequest.destinatario_nome}`
               : `Rifiutata la richiesta di ${activeRequest.richiedente_nome}`,
         });
+        if (azione === "approva") {
+          const richDip = dipendenti.find((d) => d.id === activeRequest.richiedente_id);
+          const destDip = dipendenti.find((d) => d.id === activeRequest.destinatario_id);
+          setApprovedInfo({
+            richiedente_nome: activeRequest.richiedente_nome,
+            richiedente_telefono: richDip?.telefono || "",
+            destinatario_nome: activeRequest.destinatario_nome,
+            destinatario_telefono: destDip?.telefono || "",
+          });
+        }
         setActiveRequest(null);
         fetchRichieste();
       } else {
@@ -108,7 +141,6 @@ export default function Caposala() {
 
   return (
     <div className="min-h-screen">
-      {/* Pale gold hero header */}
       <div className="bg-yellow-950/40 border-b border-yellow-800/40 px-6 md:px-10 py-8">
         <div className="max-w-5xl mx-auto flex items-center gap-5">
           <div className="h-14 w-14 rounded-2xl bg-yellow-900/60 text-yellow-400 flex items-center justify-center shadow-sm">
@@ -122,7 +154,6 @@ export default function Caposala() {
       </div>
 
       <div className="p-6 md:p-10 max-w-5xl mx-auto space-y-10">
-
         {/* Auto-generate */}
         <section>
           <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-widest mb-4">Generazione Automatica Turni</h2>
@@ -234,7 +265,6 @@ export default function Caposala() {
                         </p>
                       </div>
 
-                      {/* Big action buttons */}
                       <div className="flex flex-row md:flex-col gap-3 md:w-32 shrink-0 md:justify-center">
                         <Button
                           size="lg"
@@ -307,6 +337,69 @@ export default function Caposala() {
               </Button>
             </div>
           </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* WhatsApp post-approval dialog */}
+      <Dialog open={!!approvedInfo} onOpenChange={(open) => !open && setApprovedInfo(null)}>
+        <DialogContent className="glass-strong border-white/10 max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-emerald-400">
+              <Check className="h-5 w-5" />
+              Scambio Approvato!
+            </DialogTitle>
+          </DialogHeader>
+          {approvedInfo && (
+            <div className="space-y-3">
+              <p className="text-sm text-muted-foreground">
+                Notifica i dipendenti via WhatsApp:
+              </p>
+
+              {approvedInfo.richiedente_telefono ? (
+                <a
+                  href={`https://wa.me/39${approvedInfo.richiedente_telefono}?text=${waMsg(approvedInfo.richiedente_nome, approvedInfo.destinatario_nome)}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center justify-center gap-2 w-full px-4 py-3 rounded-xl font-semibold text-sm text-white"
+                  style={{ background: WA_GREEN }}
+                >
+                  <MessageCircle className="h-4 w-4" />
+                  WhatsApp a {approvedInfo.richiedente_nome}
+                </a>
+              ) : (
+                <div className="flex items-center gap-2 px-4 py-3 rounded-xl text-sm text-muted-foreground border border-white/10 bg-white/5">
+                  <MessageCircle className="h-4 w-4" />
+                  {approvedInfo.richiedente_nome} — nessun numero
+                </div>
+              )}
+
+              {approvedInfo.destinatario_telefono ? (
+                <a
+                  href={`https://wa.me/39${approvedInfo.destinatario_telefono}?text=${waMsg(approvedInfo.destinatario_nome, approvedInfo.richiedente_nome)}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center justify-center gap-2 w-full px-4 py-3 rounded-xl font-semibold text-sm text-white"
+                  style={{ background: WA_GREEN }}
+                >
+                  <MessageCircle className="h-4 w-4" />
+                  WhatsApp a {approvedInfo.destinatario_nome}
+                </a>
+              ) : (
+                <div className="flex items-center gap-2 px-4 py-3 rounded-xl text-sm text-muted-foreground border border-white/10 bg-white/5">
+                  <MessageCircle className="h-4 w-4" />
+                  {approvedInfo.destinatario_nome} — nessun numero
+                </div>
+              )}
+
+              <Button
+                variant="outline"
+                className="w-full border-white/10 hover:bg-white/5 mt-2"
+                onClick={() => setApprovedInfo(null)}
+              >
+                Chiudi
+              </Button>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
     </div>

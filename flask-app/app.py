@@ -14,7 +14,12 @@ app.secret_key = os.environ.get('SESSION_SECRET', 'turni-segreto-2024')
 CORS(app, supports_credentials=True, origins='*')
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-app.config['SQLALCHEMY_DATABASE_URI'] = f"sqlite:///{os.path.join(BASE_DIR, 'gestione_turni.db')}"
+_raw_db_url = os.environ.get('DATABASE_URL', '')
+if _raw_db_url.startswith('postgres://'):
+    _raw_db_url = _raw_db_url.replace('postgres://', 'postgresql://', 1)
+app.config['SQLALCHEMY_DATABASE_URI'] = (
+    _raw_db_url or f"sqlite:///{os.path.join(BASE_DIR, 'gestione_turni.db')}"
+)
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 db = SQLAlchemy(app)
@@ -39,8 +44,9 @@ class Dipendente(db.Model):
     password_changed = db.Column(db.Boolean, default=False)
     last_login = db.Column(db.String(20), default='')
     last_seen = db.Column(db.String(20), default='')
+    telefono = db.Column(db.String(20), default='')
 
-    def to_dict(self):
+    def to_dict(self, include_phone=False):
         return {
             'id': self.id,
             'nome': self.nome,
@@ -54,6 +60,7 @@ class Dipendente(db.Model):
             'password_changed': bool(self.password_changed),
             'last_login': self.last_login or '',
             'last_seen': self.last_seen or '',
+            'telefono': (self.telefono or '') if include_phone else '',
         }
 
 
@@ -193,7 +200,7 @@ def login():
         user.last_login = now
         user.last_seen = now
         db.session.commit()
-        return jsonify(user.to_dict() | {'success': True})
+        return jsonify(user.to_dict(include_phone=True) | {'success': True})
     return jsonify({'errore': 'Credenziali errate'}), 401
 
 
@@ -208,10 +215,17 @@ def change_password():
     new_pw = str(data.get('new_password', ''))[:100].strip()
     if len(new_pw) < 6:
         return jsonify({'errore': 'La password deve essere di almeno 6 caratteri'}), 400
+    telefono_raw = str(data.get('telefono', '')).strip().replace(' ', '').replace('-', '')
+    for prefix in ('+39', '0039'):
+        if telefono_raw.startswith(prefix):
+            telefono_raw = telefono_raw[len(prefix):]
+            break
+    if telefono_raw:
+        user.telefono = telefono_raw[:15]
     user.password = new_pw
     user.password_changed = True
     db.session.commit()
-    return jsonify(user.to_dict())
+    return jsonify(user.to_dict(include_phone=True))
 
 
 @api.route('/api/logout', methods=['POST'])
@@ -229,7 +243,7 @@ def me():
         return jsonify({'errore': 'Utente non trovato'}), 404
     user.last_seen = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     db.session.commit()
-    return jsonify(user.to_dict())
+    return jsonify(user.to_dict(include_phone=True))
 
 
 @api.route('/api/online', methods=['GET'])
@@ -240,13 +254,30 @@ def get_online():
     if not me or not me.is_admin:
         return jsonify({'errore': 'Non autorizzato'}), 403
     utenti = Dipendente.query.order_by(Dipendente.last_seen.desc()).all()
-    return jsonify([u.to_dict() for u in utenti])
+    # Super-admin entries are invisible to non-super-admin viewers (future-proofing)
+    if not me.is_admin:
+        utenti = [u for u in utenti if not u.is_admin]
+    return jsonify([u.to_dict(include_phone=True) for u in utenti])
+
+
+@api.route('/api/scambi/count', methods=['GET'])
+def get_scambi_count():
+    if 'user_id' not in session:
+        return jsonify({'errore': 'Non autenticato'}), 401
+    me = db.session.get(Dipendente, session['user_id'])
+    if not me or not (me.is_admin or me.ruolo == 'CAPOSALA'):
+        return jsonify({'errore': 'Non autorizzato'}), 403
+    count = RichiestaScambio.query.filter_by(stato='IN_ATTESA').count()
+    return jsonify({'count': count})
 
 
 @api.route('/api/dipendenti', methods=['GET'])
 def get_dipendenti():
+    uid = session.get('user_id')
+    viewer = db.session.get(Dipendente, uid) if uid else None
+    can_see_phone = bool(viewer and (viewer.is_admin or viewer.ruolo == 'CAPOSALA'))
     dipendenti = Dipendente.query.order_by(Dipendente.ruolo, Dipendente.nome).all()
-    return jsonify([d.to_dict() for d in dipendenti])
+    return jsonify([d.to_dict(include_phone=can_see_phone) for d in dipendenti])
 
 
 @api.route('/api/dipendenti', methods=['POST'])
@@ -261,7 +292,7 @@ def aggiungi_dipendente():
     )
     db.session.add(nuovo)
     db.session.commit()
-    return jsonify(nuovo.to_dict()), 201
+    return jsonify(nuovo.to_dict(include_phone=True)), 201
 
 
 @api.route('/api/dipendenti/<int:id>', methods=['PUT'])
@@ -272,7 +303,7 @@ def aggiorna_dipendente(id):
         if field in data:
             setattr(d, field, data[field])
     db.session.commit()
-    return jsonify(d.to_dict())
+    return jsonify(d.to_dict(include_phone=True))
 
 
 @api.route('/api/assenze', methods=['GET'])
@@ -1047,6 +1078,7 @@ if __name__ == '__main__':
                     ('password_changed', 'BOOLEAN DEFAULT 0'),
                     ('last_login', "VARCHAR(20) DEFAULT ''"),
                     ('last_seen', "VARCHAR(20) DEFAULT ''"),
+                    ('telefono', "VARCHAR(20) DEFAULT ''"),
                 ]:
                     if col not in cols:
                         conn.execute(text(f"ALTER TABLE dipendente ADD COLUMN {col} {coldef}"))

@@ -220,7 +220,7 @@ export default function Turni() {
             <Dialog open={isAddOpen} onOpenChange={setIsAddOpen}>
               <DialogTrigger asChild>
                 <button className="flex items-center gap-2 px-4 py-2 rounded-lg font-semibold text-sm glow-gold min-h-[40px]"
-                  style={{ background: "linear-gradient(135deg, #f59e0b, #d97706)", color: "#0f172a" }}>
+                  style={{ background: "linear-gradient(155deg, #B8860B 0%, #FFBF00 38%, #FFE566 52%, #FFBF00 75%, #B8860B 100%)", color: "#0f172a" }}>
                   <Plus className="h-4 w-4" />Aggiungi
                 </button>
               </DialogTrigger>
@@ -257,7 +257,7 @@ export default function Turni() {
                     <Input value={newShift.note} onChange={(e) => setNewShift({ ...newShift, note: e.target.value })} className="border-white/10 bg-white/5" />
                   </div>
                   <button type="submit" className="w-full py-2.5 rounded-lg font-bold text-sm glow-gold"
-                    style={{ background: "linear-gradient(135deg, #f59e0b, #d97706)", color: "#0f172a" }}>
+                    style={{ background: "linear-gradient(155deg, #B8860B 0%, #FFBF00 38%, #FFE566 52%, #FFBF00 75%, #B8860B 100%)", color: "#0f172a" }}>
                     Salva Turno
                   </button>
                 </form>
@@ -425,7 +425,7 @@ export default function Turni() {
             <div className="flex gap-3 pt-1">
               <Button variant="outline" className="flex-1 border-white/10 hover:bg-white/5" onClick={() => setEditShift(null)} type="button">Annulla</Button>
               <button type="submit" className="flex-1 py-2 rounded-lg font-bold text-sm glow-gold"
-                style={{ background: "linear-gradient(135deg, #f59e0b, #d97706)", color: "#0f172a" }}>
+                style={{ background: "linear-gradient(155deg, #B8860B 0%, #FFBF00 38%, #FFE566 52%, #FFBF00 75%, #B8860B 100%)", color: "#0f172a" }}>
                 Salva Modifiche
               </button>
             </div>

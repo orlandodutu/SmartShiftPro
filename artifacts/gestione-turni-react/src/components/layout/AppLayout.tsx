@@ -5,6 +5,7 @@ import { CalendarDays, LayoutDashboard, Shuffle, Wand2, LogOut, ShieldAlert, Act
 import { Button } from "@/components/ui/button";
 import { RoleBadge } from "@/components/ui/RoleBadge";
 import type { Ruolo } from "@/lib/api";
+import { useSwapNotifications } from "@/hooks/useSwapNotifications";
 
 const ROLE_AVATAR: Record<Ruolo, string> = {
   OSS:        "bg-blue-900/60 text-blue-300",
@@ -23,6 +24,7 @@ const ROLE_DOT: Record<Ruolo, string> = {
 };
 
 export function AppLayout({ children }: { children: ReactNode }) {
+  useSwapNotifications();
   const { user, logout } = useAuth();
   const [location] = useLocation();
   const role = (user?.ruolo ?? "OSS") as Ruolo;
@@ -65,7 +67,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
               <div
                 className="absolute inset-0 rounded-xl"
                 style={{
-                  background: "radial-gradient(circle, rgba(245,158,11,0.5) 0%, transparent 70%)",
+                  background: "radial-gradient(circle, rgba(255,191,0,0.55) 0%, transparent 70%)",
                   filter: "blur(10px)",
                   transform: "scale(1.6)",
                 }}
@@ -73,8 +75,8 @@ export function AppLayout({ children }: { children: ReactNode }) {
               <div
                 className="relative h-8 w-8 rounded-xl flex items-center justify-center"
                 style={{
-                  background: "rgba(245,158,11,0.07)",
-                  border: "1px solid rgba(245,158,11,0.2)",
+                  background: "rgba(255,191,0,0.09)",
+                  border: "1px solid rgba(255,191,0,0.25)",
                 }}
               >
                 <span

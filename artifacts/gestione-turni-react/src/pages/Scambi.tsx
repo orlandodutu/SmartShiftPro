@@ -13,6 +13,32 @@ import { ShiftBadge } from "@/components/ui/ShiftBadge";
 import { RoleBadge } from "@/components/ui/RoleBadge";
 import { Plus, ArrowLeftRight, Clock } from "lucide-react";
 
+const CRYSTAL = "linear-gradient(155deg, #B8860B 0%, #FFBF00 38%, #FFE566 52%, #FFBF00 75%, #B8860B 100%)";
+
+function playDoublePing() {
+  try {
+    const AC = window.AudioContext ||
+      (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!AC) return;
+    const ctx = new AC();
+    [0, 0.32].forEach((delay) => {
+      const osc  = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(1047, ctx.currentTime + delay);
+      osc.frequency.exponentialRampToValueAtTime(880, ctx.currentTime + delay + 0.18);
+      gain.gain.setValueAtTime(0, ctx.currentTime + delay);
+      gain.gain.linearRampToValueAtTime(0.28, ctx.currentTime + delay + 0.018);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + delay + 0.6);
+      osc.start(ctx.currentTime + delay);
+      osc.stop(ctx.currentTime + delay + 0.65);
+    });
+    setTimeout(() => ctx.close(), 2500);
+  } catch { /* ignore */ }
+}
+
 export default function Scambi() {
   const { user } = useAuth();
   const { toast } = useToast();
@@ -66,6 +92,7 @@ export default function Scambi() {
       credentials: "include",
     });
     if (res.ok) {
+      playDoublePing();
       toast({ title: "Richiesta inviata" });
       setIsDialogOpen(false);
       fetchData();
@@ -95,7 +122,7 @@ export default function Scambi() {
           <DialogTrigger asChild>
             <button
               className="flex items-center gap-2 px-4 py-2 rounded-lg font-semibold text-sm glow-gold"
-              style={{ background: "linear-gradient(135deg, #f59e0b, #d97706)", color: "#0f172a" }}
+              style={{ background: CRYSTAL, color: "#0f172a" }}
               data-testid="btn-new-scambio"
             >
               <Plus className="h-4 w-4" />
@@ -144,7 +171,7 @@ export default function Scambi() {
               <button
                 type="submit"
                 className="w-full py-2.5 rounded-lg font-bold text-sm glow-gold"
-                style={{ background: "linear-gradient(135deg, #f59e0b, #d97706)", color: "#0f172a" }}
+                style={{ background: CRYSTAL, color: "#0f172a" }}
               >
                 Invia Richiesta
               </button>
