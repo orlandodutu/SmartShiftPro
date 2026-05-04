@@ -34,7 +34,7 @@ export default function Monitor() {
 
   useEffect(() => {
     fetchOnline();
-    const id = setInterval(fetchOnline, 30_000);
+    const id = setInterval(fetchOnline, 15_000);
     return () => clearInterval(id);
   }, [fetchOnline]);
 

@@ -1,4 +1,4 @@
-import { ReactNode } from "react";
+import { ReactNode, useEffect } from "react";
 import { Link, useLocation } from "wouter";
 import { useAuth } from "@/contexts/AuthContext";
 import { CalendarDays, LayoutDashboard, Shuffle, Wand2, LogOut, ShieldAlert, Activity, LayoutGrid, Archive } from "lucide-react";
@@ -39,6 +39,14 @@ export function AppLayout({ children }: { children: ReactNode }) {
   const avatarClass = ROLE_AVATAR[role] ?? ROLE_AVATAR.OSS;
   const dotClass = ROLE_DOT[role] ?? ROLE_DOT.OSS;
 
+  /* ── Heartbeat: aggiorna last_seen ogni 60s per il Monitor online ── */
+  useEffect(() => {
+    if (!user) return;
+    const ping = () => fetch("/flask-api/api/me", { credentials: "include" }).catch(() => {});
+    const id = setInterval(ping, 60_000);
+    return () => clearInterval(id);
+  }, [user]);
+
   const navItems = [
     { href: "/dashboard", label: "Dashboard",    icon: LayoutDashboard },
     { href: "/turni",     label: "Turni",         icon: CalendarDays    },
@@ -50,7 +58,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
     navItems.push({ href: "/griglia",  label: "Griglia",      icon: LayoutGrid });
     navItems.push({ href: "/archivio", label: "Archivio",     icon: Archive    });
   }
-  if (user?.ruolo === "CAPOSALA") {
+  if (user?.ruolo === "CAPOSALA" || user?.is_admin) {
     navItems.push({ href: "/caposala", label: "Area Caposala", icon: ShieldAlert });
   }
   if (user?.is_admin) {
@@ -130,7 +138,12 @@ export function AppLayout({ children }: { children: ReactNode }) {
                     {pendingCount > 9 ? "9+" : pendingCount}
                   </span>
                 )}
-                {item.href === "/caposala" && (
+                {item.href === "/caposala" && pendingCount > 0 && (
+                  <span className="ml-auto min-w-[1.25rem] h-5 px-1.5 rounded-full bg-amber-500 text-[10px] font-black text-slate-900 flex items-center justify-center animate-pulse">
+                    {pendingCount > 9 ? "9+" : pendingCount}
+                  </span>
+                )}
+                {item.href === "/caposala" && pendingCount === 0 && (
                   <span className={`ml-auto h-1.5 w-1.5 rounded-full ${dotClass}`} />
                 )}
                 {isMonitor && !isActive && (
