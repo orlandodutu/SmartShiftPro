@@ -13,7 +13,7 @@ import { RoleBadge } from "@/components/ui/RoleBadge";
 import { ShiftBadge } from "@/components/ui/ShiftBadge";
 import {
   Check, X, CalendarRange, Calendar, ShieldAlert, ArrowLeftRight,
-  MessageCircle, UserPlus, Pencil, KeyRound, Phone, Users, Copy,
+  MessageCircle, UserPlus, Pencil, KeyRound, Phone, Users, Copy, Trash2,
 } from "lucide-react";
 
 const CRYSTAL = "linear-gradient(155deg, #B8860B 0%, #FFBF00 38%, #FFE566 52%, #FFBF00 75%, #B8860B 100%)";
@@ -63,6 +63,8 @@ export default function Caposala() {
   const [editDip, setEditDip] = useState<Dipendente | null>(null);
   const [editRuolo, setEditRuolo] = useState("");
   const [editLoading, setEditLoading] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<Dipendente | null>(null);
+  const [deleteLoading, setDeleteLoading] = useState(false);
 
   const fetchRichieste = async () => {
     setLoadingRichieste(true);
@@ -209,6 +211,31 @@ export default function Caposala() {
       }
     } finally {
       setEditLoading(false);
+    }
+  };
+
+  // ─── Delete dipendente ───
+  const handleDelete = async () => {
+    if (!deleteTarget) return;
+    setDeleteLoading(true);
+    try {
+      const res = await fetch(`/flask-api/api/dipendenti/${deleteTarget.id}`, {
+        method: "DELETE",
+        credentials: "include",
+      });
+      if (res.ok) {
+        toast({
+          title: `${deleteTarget.nome} rimosso`,
+          description: "Tutti i turni e le richieste associate sono stati eliminati.",
+        });
+        setDeleteTarget(null);
+        fetchDipendenti();
+      } else {
+        const err = await res.json();
+        toast({ title: err.errore || "Errore", variant: "destructive" });
+      }
+    } finally {
+      setDeleteLoading(false);
     }
   };
 
@@ -480,6 +507,16 @@ export default function Caposala() {
                     >
                       <KeyRound className="h-3.5 w-3.5" />
                     </button>
+                    {!d.is_admin && (
+                      <button
+                        title="Elimina dipendente"
+                        onClick={() => setDeleteTarget(d)}
+                        className="h-8 w-8 rounded-lg bg-white/5 hover:bg-red-500/15 border border-white/10 hover:border-red-500/30 flex items-center justify-center text-muted-foreground hover:text-red-400 transition-colors"
+                        data-testid={`delete-${d.id}`}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    )}
                   </div>
                 </div>
               ))
@@ -718,6 +755,55 @@ export default function Caposala() {
               <Button className="w-full bg-emerald-600 hover:bg-emerald-500 text-white" onClick={() => setCreatedCreds(null)}>
                 Perfetto
               </Button>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* ─── Delete confirmation dialog ─── */}
+      <Dialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+        <DialogContent className="glass-strong border-white/10 max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-red-400">
+              <Trash2 className="h-5 w-5" />
+              Elimina Dipendente
+            </DialogTitle>
+          </DialogHeader>
+          {deleteTarget && (
+            <div className="space-y-4">
+              <div className="rounded-xl bg-red-500/8 border border-red-500/20 p-4 space-y-2">
+                <p className="text-sm font-semibold text-foreground">
+                  Stai per eliminare <span className="text-red-300">{deleteTarget.nome}</span>
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  Questa azione è <strong className="text-red-400">irreversibile</strong>. Verranno eliminati:
+                </p>
+                <ul className="text-xs text-muted-foreground space-y-0.5 ml-3">
+                  <li>• Tutti i turni assegnati</li>
+                  <li>• Tutte le richieste di scambio</li>
+                  <li>• Tutte le assenze registrate</li>
+                  <li>• L'accesso all'app</li>
+                </ul>
+              </div>
+              <div className="flex gap-3">
+                <Button
+                  variant="outline"
+                  className="flex-1 border-white/10 hover:bg-white/5"
+                  onClick={() => setDeleteTarget(null)}
+                  disabled={deleteLoading}
+                >
+                  Annulla
+                </Button>
+                <Button
+                  className="flex-1 bg-red-600 hover:bg-red-500 text-white gap-2"
+                  onClick={handleDelete}
+                  disabled={deleteLoading}
+                  data-testid="confirm-delete"
+                >
+                  <Trash2 className="h-4 w-4" />
+                  {deleteLoading ? "Eliminazione..." : "Elimina"}
+                </Button>
+              </div>
             </div>
           )}
         </DialogContent>

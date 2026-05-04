@@ -327,6 +327,33 @@ def aggiorna_dipendente(id):
     return jsonify(d.to_dict(include_phone=True))
 
 
+@api.route('/api/dipendenti/<int:id>', methods=['DELETE'])
+def elimina_dipendente(id):
+    if 'user_id' not in session:
+        return jsonify({'errore': 'Non autenticato'}), 401
+    me = db.session.get(Dipendente, session['user_id'])
+    if not me or not (me.is_admin or me.ruolo == 'CAPOSALA'):
+        return jsonify({'errore': 'Non autorizzato'}), 403
+    d = db.session.get(Dipendente, id)
+    if not d:
+        return jsonify({'errore': 'Dipendente non trovato'}), 404
+    if d.is_admin:
+        return jsonify({'errore': 'Non puoi eliminare un amministratore'}), 403
+    if d.id == me.id:
+        return jsonify({'errore': 'Non puoi eliminare te stesso'}), 400
+    # Cascade: remove turni, scambi, assenze
+    Turno.query.filter_by(dipendente_id=id).delete()
+    RichiestaScambio.query.filter(
+        (RichiestaScambio.richiedente_id == id) |
+        (RichiestaScambio.destinatario_id == id)
+    ).delete(synchronize_session=False)
+    Assenza.query.filter_by(dipendente_id=id).delete()
+    nome = d.nome
+    db.session.delete(d)
+    db.session.commit()
+    return jsonify({'success': True, 'nome': nome})
+
+
 @api.route('/api/assenze', methods=['GET'])
 def get_assenze():
     if 'user_id' not in session:
@@ -377,15 +404,6 @@ def elimina_assenza(id):
     if not assenza:
         return jsonify({'errore': 'Assenza non trovata'}), 404
     db.session.delete(assenza)
-    db.session.commit()
-    return jsonify({'success': True})
-
-
-@api.route('/api/dipendenti/<int:id>', methods=['DELETE'])
-def elimina_dipendente(id):
-    d = Dipendente.query.get_or_404(id)
-    Turno.query.filter_by(dipendente_id=id).delete()
-    db.session.delete(d)
     db.session.commit()
     return jsonify({'success': True})
 
