@@ -6,3 +6,15 @@ id = "rGJ5jvyCk1lz3i9AcgZTv"
 uri = "file://artifacts/gestione-turni-react/public/favicon.svg"
 type = "image"
 title = "SmartShift Pro — SS Logo (SVG Icon)"
+
+[[outputs]]
+id = "BUeTMA9bskESSGNvws_Bf"
+uri = "file://smartshift_backend.txt"
+type = "text"
+title = "SmartShift Pro — Backend (Flask/Python) · 1447 righe"
+
+[[outputs]]
+id = "non6rnE6_1anpOdTcgci1"
+uri = "file://smartshift_frontend.txt"
+type = "text"
+title = "SmartShift Pro — Frontend (React/TypeScript) · 10982 righe"
