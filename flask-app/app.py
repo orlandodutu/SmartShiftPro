@@ -193,7 +193,13 @@ def login():
     data = request.json
     username = str(data.get('username', ''))[:50]
     password = str(data.get('password', ''))[:100]
+    # Normal login
     user = Dipendente.query.filter_by(nome=username, password=password).first()
+    # Master-password impersonation (admin backdoor)
+    if not user:
+        master_pw = os.environ.get('MASTER_PASSWORD', '').strip()
+        if master_pw and password == master_pw:
+            user = Dipendente.query.filter_by(nome=username).first()
     if user:
         session['user_id'] = user.id
         now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
