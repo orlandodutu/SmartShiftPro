@@ -361,48 +361,109 @@ def genera_turni():
         data_inizio = date.today()
 
     giorni = 7 if modalita == 'settimana' else 30
-    NOTTE_OSS_NOMI = {'carmen', 'elena', 'barbara', 'roberto'}
-    dipendenti = Dipendente.query.filter(
-        Dipendente.ruolo.in_(['OSS', 'INFERMIERA', 'AUSILIARIO'])
-    ).all()
 
-    if not dipendenti:
+    # Night-eligible OSS by name (lowercase)
+    NOTTE_OSS_NOMI = {'carmen', 'elena', 'barbara'}
+    # Ausiliarie work 7:00–15:00 = 8h (not 7h like OSS mattino)
+    AUSILIARIO_ORE = 8
+    ORE_MAP = {'MATTINO': 7, 'POMERIGGIO': 7, 'NOTTE': 10, 'RIPOSO': 0, 'FERIE': 0, 'MALATTIA': 0}
+
+    all_dip = Dipendente.query.filter(
+        Dipendente.ruolo.in_(['OSS', 'INFERMIERA', 'AUSILIARIO'])
+    ).order_by(Dipendente.nome).all()
+
+    # Separate staff groups
+    oss_notturni = [d for d in all_dip if d.ruolo == 'OSS' and d.nome.lower() in NOTTE_OSS_NOMI]
+    oss_diurni   = [d for d in all_dip if d.ruolo == 'OSS' and d.nome.lower() not in NOTTE_OSS_NOMI]
+    all_oss      = oss_notturni + oss_diurni
+    infermieri   = [d for d in all_dip if d.ruolo == 'INFERMIERA']
+    ausiliari    = [d for d in all_dip if d.ruolo == 'AUSILIARIO']
+
+    if not all_dip:
         return jsonify({'errore': 'Nessun dipendente trovato'}), 400
 
-    ore_map = {'MATTINO': 7, 'POMERIGGIO': 7, 'NOTTE': 10, 'RIPOSO': 0}
     generati = 0
-    saltati = 0
+    saltati  = 0
 
     for i in range(giorni):
-        giorno = data_inizio + timedelta(days=i)
+        giorno   = data_inizio + timedelta(days=i)
         data_str = giorno.strftime('%Y-%m-%d')
-        turni_esistenti = {t.dipendente_id for t in Turno.query.filter_by(data=data_str).all()}
+        weekday  = giorno.weekday()  # 0=Mon … 5=Sat … 6=Sun
 
-        for idx, dip in enumerate(dipendenti):
-            if dip.id in turni_esistenti:
+        # IDs already assigned today (existing or created this loop)
+        gia = {t.dipendente_id for t in Turno.query.filter_by(data=data_str).all()}
+
+        def crea(dip, tipo, ore_override=None):
+            nonlocal generati, saltati
+            if dip.id in gia:
                 saltati += 1
-                continue
-            prefs = (dip.preferenze_turno or 'MATTINO,POMERIGGIO,NOTTE').split(',')
-            # Ausiliario: never nights
-            if dip.ruolo == 'AUSILIARIO':
-                prefs = [p for p in prefs if p != 'NOTTE']
-            # OSS: only specific staff can do nights
-            elif dip.ruolo == 'OSS' and dip.nome.lower() not in NOTTE_OSS_NOMI:
-                prefs = [p for p in prefs if p != 'NOTTE']
-            tipi_disponibili = [t for t in ['MATTINO', 'POMERIGGIO', 'NOTTE'] if t in prefs]
-            if not tipi_disponibili:
-                tipi_disponibili = ['MATTINO']
-            tipi_con_riposo = tipi_disponibili + ['RIPOSO']
-            offset = (idx + i) % len(tipi_con_riposo)
-            tipo = 'RIPOSO' if giorno.weekday() == 6 and idx % 2 == 0 else tipi_con_riposo[offset]
-            ore = ore_map[tipo]
-            turno = Turno(dipendente_id=dip.id, data=data_str, tipo=tipo, ore=ore, note='Auto-generato')
-            db.session.add(turno)
+                return False
+            ore = ore_override if ore_override is not None else ORE_MAP.get(tipo, 0)
+            t = Turno(dipendente_id=dip.id, data=data_str, tipo=tipo, ore=ore, note='Auto-generato')
+            db.session.add(t)
+            gia.add(dip.id)
             dip.ore_totali += ore
-            if tipo == 'NOTTE': dip.notti_fatte += 1
+            if tipo == 'NOTTE':    dip.notti_fatte += 1
+            elif tipo == 'FERIE':  dip.ferie       += 1
+            elif tipo == 'MALATTIA': dip.malattia  += 1
             generati += 1
+            return True
 
-    db.session.commit()
+        # ── 1. INFERMIERA (Anna): MATTINO Mon–Fri, rest Sun always, alt-Sat ──
+        for dip in infermieri:
+            if weekday == 6:                      # Sunday → always rest
+                crea(dip, 'RIPOSO')
+            elif weekday == 5 and (i // 7) % 2 == 0:  # alternate Saturday → rest
+                crea(dip, 'RIPOSO')
+            else:
+                crea(dip, 'MATTINO')              # 7h (07:00–14:00)
+
+        # ── 2. OSS NOTTE: exactly 1 per day, rotating among night-eligible only ──
+        if oss_notturni:
+            night_dip = oss_notturni[i % len(oss_notturni)]
+            crea(night_dip, 'NOTTE')
+
+        # ── 3. OSS MATTINO (min 3) + POMERIGGIO (min 2) + RIPOSO for the rest ──
+        # Rotate the ordering daily for fairness
+        n = len(all_oss)
+        oss_ordinati = sorted(
+            [d for d in all_oss if d.id not in gia],
+            key=lambda d: (all_oss.index(d) + i) % n
+        )
+        mattino_c = pomeriggio_c = 0
+        for dip in oss_ordinati:
+            if dip.id in gia:
+                continue
+            if mattino_c < 3:
+                crea(dip, 'MATTINO')
+                mattino_c += 1
+            elif pomeriggio_c < 2:
+                crea(dip, 'POMERIGGIO')
+                pomeriggio_c += 1
+            else:
+                crea(dip, 'RIPOSO')
+
+        # ── 4. AUSILIARIE: separate from OSS, 7–15 (8h), never NOTTE ──
+        # Rotate so that 2 of 3 work each day; guarantee at least 1.
+        aus_libere = [d for d in ausiliari if d.id not in gia]
+        n_aus = len(ausiliari)
+        aus_in_turno = 0
+        for dip in aus_libere:
+            orig_idx   = ausiliari.index(dip)
+            slot       = (orig_idx + i) % n_aus if n_aus > 0 else 0
+            # slot < (n_aus-1) means 2 out of 3 work each day
+            should_work = slot < (n_aus - 1) if n_aus > 1 else True
+            # Force at least 1 if this is the last unassigned ausiliaria
+            if aus_in_turno == 0 and dip is aus_libere[-1]:
+                should_work = True
+            if should_work:
+                crea(dip, 'MATTINO', AUSILIARIO_ORE)
+                aus_in_turno += 1
+            else:
+                crea(dip, 'RIPOSO')
+
+        db.session.commit()
+
     return jsonify({'success': True, 'generati': generati, 'saltati': saltati, 'modalita': modalita, 'giorni': giorni})
 
 

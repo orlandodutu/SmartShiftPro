@@ -1,0 +1,8 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "rGJ5jvyCk1lz3i9AcgZTv"
+uri = "file://artifacts/gestione-turni-react/public/favicon.svg"
+type = "image"
+title = "SmartShift Pro — SS Logo (SVG Icon)"
