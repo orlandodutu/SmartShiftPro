@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Maskable: full-bleed background, logo within 80% safe zone -->
+  <defs>
+    <radialGradient id="mbg" cx="40%" cy="30%" r="85%">
+      <stop offset="0%" stop-color="#0d1a2d"/>
+      <stop offset="100%" stop-color="#050a14"/>
+    </radialGradient>
+    <radialGradient id="mglow" cx="50%" cy="58%" r="45%">
+      <stop offset="0%" stop-color="#FFBF00" stop-opacity="0.5"/>
+      <stop offset="55%" stop-color="#FFBF00" stop-opacity="0.15"/>
+      <stop offset="100%" stop-color="#FFBF00" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="mtg" x="-35%" y="-35%" width="170%" height="170%">
+      <feGaussianBlur stdDeviation="14" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+  <!-- Full-bleed background (no rounded corners — OS clips the shape) -->
+  <rect width="512" height="512" fill="url(#mbg)"/>
+  <!-- Glow centered in safe zone -->
+  <ellipse cx="256" cy="275" rx="170" ry="135" fill="url(#mglow)"/>
+  <!-- SS text scaled to fit within 80% safe zone -->
+  <text x="256" y="320"
+    font-family="'Helvetica Neue',Helvetica,Arial,sans-serif"
+    font-weight="200" font-size="230" text-anchor="middle"
+    fill="#FFBF00" filter="url(#mtg)" letter-spacing="-12">SS</text>
+  <text x="256" y="398"
+    font-family="'Helvetica Neue',sans-serif"
+    font-weight="300" font-size="36" text-anchor="middle"
+    fill="#FFBF00" fill-opacity="0.35" letter-spacing="16">PRO</text>
+</svg>

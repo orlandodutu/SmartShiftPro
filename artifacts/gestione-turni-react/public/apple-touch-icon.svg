@@ -5,8 +5,8 @@
       <stop offset="100%" stop-color="#050a14"/>
     </radialGradient>
     <radialGradient id="glow" cx="50%" cy="58%" r="45%">
-      <stop offset="0%" stop-color="#f59e0b" stop-opacity="0.45"/>
-      <stop offset="100%" stop-color="#f59e0b" stop-opacity="0"/>
+      <stop offset="0%" stop-color="#FFBF00" stop-opacity="0.45"/>
+      <stop offset="100%" stop-color="#FFBF00" stop-opacity="0"/>
     </radialGradient>
     <filter id="tg" x="-40%" y="-40%" width="180%" height="180%">
       <feGaussianBlur stdDeviation="5" result="b"/>
@@ -18,5 +18,5 @@
   <text x="90" y="117"
     font-family="'Helvetica Neue',Helvetica,Arial,sans-serif"
     font-weight="200" font-size="94" text-anchor="middle"
-    fill="#f59e0b" filter="url(#tg)" letter-spacing="-5">SS</text>
+    fill="#FFBF00" filter="url(#tg)" letter-spacing="-5">SS</text>
 </svg>
