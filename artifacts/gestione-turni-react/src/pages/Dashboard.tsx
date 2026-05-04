@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from "react";
-import { Dipendente, Turno } from "@/lib/api";
+import { Dipendente, Turno, Assenza } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -8,12 +8,18 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { Input } from "@/components/ui/input";
 import { RoleBadge } from "@/components/ui/RoleBadge";
 import { ShiftBadge } from "@/components/ui/ShiftBadge";
 import { useToast } from "@/hooks/use-toast";
-import { Clock, Moon, CalendarOff, Pill, ArrowLeftRight, User, Settings2, Sun, Sunset, BedDouble, Check } from "lucide-react";
+import {
+  Clock, Moon, CalendarOff, Pill, ArrowLeftRight, User,
+  Settings2, Sun, Sunset, BedDouble, Check, Trash2,
+  PlusCircle, AlertTriangle, Palmtree, CalendarX,
+} from "lucide-react";
 import type { Ruolo } from "@/lib/api";
 
+/* ── Role theme ── */
 const ROLE_THEME: Record<Ruolo, { bg: string; border: string; accent: string; avatar: string; dot: string }> = {
   OSS:        { bg: "bg-blue-950/40",    border: "border-blue-800/50",    accent: "text-blue-300",    avatar: "bg-blue-900/60 text-blue-300",    dot: "bg-blue-400"    },
   INFERMIERA: { bg: "bg-emerald-950/40", border: "border-emerald-800/50", accent: "text-emerald-300", avatar: "bg-emerald-900/60 text-emerald-300", dot: "bg-emerald-400" },
@@ -23,12 +29,20 @@ const ROLE_THEME: Record<Ruolo, { bg: string; border: string; accent: string; av
 };
 
 type Pref = "MATTINO" | "POMERIGGIO" | "NOTTE";
-
 const PREF_OPTIONS: { key: Pref; label: string; icon: typeof Sun; color: string }[] = [
   { key: "MATTINO",    label: "Mattino",    icon: Sun,       color: "bg-amber-500/15 text-amber-300 border-amber-500/30"    },
   { key: "POMERIGGIO", label: "Pomeriggio", icon: Sunset,    color: "bg-orange-500/15 text-orange-300 border-orange-500/30" },
   { key: "NOTTE",      label: "Notte",      icon: BedDouble, color: "bg-indigo-500/15 text-indigo-300 border-indigo-500/30" },
 ];
+
+function formatDate(d: string) {
+  if (!d) return "";
+  return new Date(d + "T00:00:00").toLocaleDateString("it-IT", { day: "numeric", month: "short", year: "numeric" });
+}
+
+function isActiveToday(a: Assenza, today: string) {
+  return a.data_inizio <= today && a.data_fine >= today;
+}
 
 export default function Dashboard() {
   const { user } = useAuth();
@@ -36,12 +50,15 @@ export default function Dashboard() {
   const role = (user?.ruolo ?? "OSS") as Ruolo;
   const theme = ROLE_THEME[role] ?? ROLE_THEME.OSS;
   const canManage = user?.is_admin || user?.ruolo === "CAPOSALA";
+  const today = new Date().toISOString().split("T")[0];
 
   const [stats, setStats] = useState<Dipendente[]>([]);
   const [meiTurni, setMeiTurni] = useState<Turno[]>([]);
   const [loading, setLoading] = useState(true);
   const [dipendenti, setDipendenti] = useState<Dipendente[]>([]);
+  const [tutteAssenze, setTutteAssenze] = useState<Assenza[]>([]);
 
+  /* Swap state */
   const [swapOpen, setSwapOpen] = useState(false);
   const [swapTurno, setSwapTurno] = useState<Turno | null>(null);
   const [colleagueId, setColleagueId] = useState("");
@@ -50,13 +67,29 @@ export default function Dashboard() {
   const [swapNota, setSwapNota] = useState("");
   const [swapLoading, setSwapLoading] = useState(false);
 
-  const [prefTarget, setPrefTarget] = useState<Dipendente | null>(null);
+  /* Staff profile modal */
+  const [profileTarget, setProfileTarget] = useState<Dipendente | null>(null);
+  const [profileTab, setProfileTab] = useState<"preferenze" | "assenze">("preferenze");
+
+  /* Preferences */
   const [prefSelected, setPrefSelected] = useState<Pref[]>([]);
   const [prefLoading, setPrefLoading] = useState(false);
 
-  const today = new Date();
-  const mese = today.getMonth() + 1;
-  const anno = today.getFullYear();
+  /* Absences */
+  const [assenze, setAssenze] = useState<Assenza[]>([]);
+  const [assenzeLoading, setAssenzeLoading] = useState(false);
+  const [newAssenza, setNewAssenza] = useState<{
+    tipo: "MALATTIA" | "FERIE"; data_inizio: string; data_fine: string; note: string;
+  }>({ tipo: "MALATTIA", data_inizio: today, data_fine: today, note: "" });
+  const [addingAssenza, setAddingAssenza] = useState(false);
+
+  const mese = new Date().getMonth() + 1;
+  const anno = new Date().getFullYear();
+
+  const fetchAllAssenze = async () => {
+    const res = await fetch("/flask-api/api/assenze", { credentials: "include" });
+    if (res.ok) setTutteAssenze(await res.json());
+  };
 
   const fetchData = useCallback(async () => {
     if (!user) return;
@@ -69,10 +102,11 @@ export default function Dashboard() {
       if (statsRes.ok) setStats(await statsRes.json());
       if (turniRes.ok) {
         const all: Turno[] = await turniRes.json();
-        const todayStr = today.toISOString().split("T")[0];
+        const todayStr = today;
         setMeiTurni(all.filter((t) => t.data >= todayStr).sort((a, b) => a.data.localeCompare(b.data)).slice(0, 10));
       }
       if (dipRes.ok) setDipendenti(await dipRes.json());
+      if (canManage) await fetchAllAssenze();
     } finally { setLoading(false); }
   }, [user]);
 
@@ -84,10 +118,88 @@ export default function Dashboard() {
       .then((r) => r.ok ? r.json() : []).then(setColleagueTurni);
   }, [colleagueId]);
 
+  /* ── Staff profile open ── */
+  const openProfile = (dip: Dipendente) => {
+    if (!canManage) return;
+    setProfileTarget(dip);
+    setProfileTab("preferenze");
+    setPrefSelected((dip.preferenze_turno ?? ["MATTINO", "POMERIGGIO", "NOTTE"]) as Pref[]);
+    setAssenze([]);
+    setNewAssenza({ tipo: "MALATTIA", data_inizio: today, data_fine: today, note: "" });
+    setAddingAssenza(false);
+  };
+
+  /* Fetch absences for selected staff */
+  useEffect(() => {
+    if (!profileTarget || profileTab !== "assenze") return;
+    setAssenzeLoading(true);
+    fetch(`/flask-api/api/assenze?dipendente_id=${profileTarget.id}`, { credentials: "include" })
+      .then((r) => r.ok ? r.json() : [])
+      .then(setAssenze)
+      .finally(() => setAssenzeLoading(false));
+  }, [profileTarget, profileTab]);
+
+  /* ── Preferences save ── */
+  const savePref = async () => {
+    if (!profileTarget || prefSelected.length === 0) {
+      toast({ title: "Seleziona almeno un turno", variant: "destructive" }); return;
+    }
+    setPrefLoading(true);
+    try {
+      const res = await fetch(`/flask-api/api/dipendenti/${profileTarget.id}/preferenze`, {
+        method: "PUT", headers: { "Content-Type": "application/json" }, credentials: "include",
+        body: JSON.stringify({ preferenze: prefSelected }),
+      });
+      if (res.ok) {
+        const updated: Dipendente = await res.json();
+        setStats((prev) => prev.map((d) => d.id === updated.id ? updated : d));
+        setDipendenti((prev) => prev.map((d) => d.id === updated.id ? updated : d));
+        toast({ title: `Preferenze di ${profileTarget.nome} aggiornate` });
+      } else toast({ title: "Errore", variant: "destructive" });
+    } finally { setPrefLoading(false); }
+  };
+
+  /* ── Add absence ── */
+  const handleAddAssenza = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!profileTarget) return;
+    if (newAssenza.data_inizio > newAssenza.data_fine) {
+      toast({ title: "La data inizio deve precedere la data fine", variant: "destructive" }); return;
+    }
+    setAddingAssenza(true);
+    try {
+      const res = await fetch("/flask-api/api/assenze", {
+        method: "POST", headers: { "Content-Type": "application/json" }, credentials: "include",
+        body: JSON.stringify({ dipendente_id: profileTarget.id, ...newAssenza }),
+      });
+      if (res.ok) {
+        const nuova: Assenza = await res.json();
+        setAssenze((prev) => [nuova, ...prev]);
+        setTutteAssenze((prev) => [nuova, ...prev]);
+        setNewAssenza({ tipo: "MALATTIA", data_inizio: today, data_fine: today, note: "" });
+        toast({ title: `Assenza registrata per ${profileTarget.nome}` });
+      } else {
+        const err = await res.json();
+        toast({ title: err.errore || "Errore", variant: "destructive" });
+      }
+    } finally { setAddingAssenza(false); }
+  };
+
+  /* ── Delete absence ── */
+  const handleDeleteAssenza = async (id: number) => {
+    if (!confirm("Eliminare questa assenza?")) return;
+    const res = await fetch(`/flask-api/api/assenze/${id}`, { method: "DELETE", credentials: "include" });
+    if (res.ok) {
+      setAssenze((prev) => prev.filter((a) => a.id !== id));
+      setTutteAssenze((prev) => prev.filter((a) => a.id !== id));
+      toast({ title: "Assenza eliminata" });
+    } else toast({ title: "Errore", variant: "destructive" });
+  };
+
+  /* ── Swap ── */
   const openSwap = (turno: Turno) => {
     setSwapTurno(turno); setColleagueId(""); setColleagueTurnoId(""); setSwapNota(""); setSwapOpen(true);
   };
-
   const submitSwap = async () => {
     if (!swapTurno || !colleagueId) { toast({ title: "Seleziona collega", variant: "destructive" }); return; }
     setSwapLoading(true);
@@ -101,33 +213,9 @@ export default function Dashboard() {
     } finally { setSwapLoading(false); }
   };
 
-  const openPref = (dip: Dipendente) => {
-    if (!canManage) return;
-    setPrefTarget(dip);
-    setPrefSelected((dip.preferenze_turno ?? ["MATTINO", "POMERIGGIO", "NOTTE"]) as Pref[]);
-  };
-
-  const togglePref = (key: Pref) =>
-    setPrefSelected((prev) => prev.includes(key) ? prev.filter((p) => p !== key) : [...prev, key]);
-
-  const savePref = async () => {
-    if (!prefTarget) return;
-    if (prefSelected.length === 0) { toast({ title: "Seleziona almeno un turno", variant: "destructive" }); return; }
-    setPrefLoading(true);
-    try {
-      const res = await fetch(`/flask-api/api/dipendenti/${prefTarget.id}/preferenze`, {
-        method: "PUT", headers: { "Content-Type": "application/json" }, credentials: "include",
-        body: JSON.stringify({ preferenze: prefSelected }),
-      });
-      if (res.ok) {
-        const updated: Dipendente = await res.json();
-        setStats((prev) => prev.map((d) => d.id === updated.id ? updated : d));
-        setDipendenti((prev) => prev.map((d) => d.id === updated.id ? updated : d));
-        toast({ title: `Preferenze di ${prefTarget.nome} aggiornate` });
-        setPrefTarget(null);
-      } else toast({ title: "Errore", variant: "destructive" });
-    } finally { setPrefLoading(false); }
-  };
+  /* ── Helpers ── */
+  const getAbsenceToday = (dipId: number) =>
+    tutteAssenze.find((a) => a.dipendente_id === dipId && isActiveToday(a, today));
 
   const myStats = stats.find((s) => s.id === user?.id) ?? user;
   const statCards = [
@@ -139,6 +227,7 @@ export default function Dashboard() {
 
   return (
     <div className="min-h-screen">
+      {/* Profile header */}
       <div className={`${theme.bg} border-b ${theme.border} px-6 md:px-10 py-8`}>
         <div className="max-w-7xl mx-auto flex items-center gap-5">
           <div className={`h-16 w-16 rounded-2xl ${theme.avatar} flex items-center justify-center text-2xl font-black`}>
@@ -157,6 +246,7 @@ export default function Dashboard() {
       </div>
 
       <div className="p-6 md:p-10 max-w-7xl mx-auto space-y-8">
+        {/* Stat cards */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           {statCards.map(({ label, value, icon: Icon, color, bg }) => (
             <div key={label} className="glass rounded-2xl p-5 flex items-center gap-4">
@@ -170,6 +260,7 @@ export default function Dashboard() {
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-5 gap-8">
+          {/* My upcoming shifts */}
           <div className="lg:col-span-3">
             <Card className="glass border-white/8 shadow-none">
               <CardHeader className="pb-3">
@@ -197,8 +288,7 @@ export default function Dashboard() {
                           {turno.ore > 0 && <span className="text-xs text-muted-foreground">{turno.ore}h</span>}
                         </div>
                         <Button size="sm" variant="outline" className="shrink-0 text-xs gap-1.5 border-white/10 hover:border-amber-500/50 hover:text-amber-400 hover:bg-amber-500/10" onClick={() => openSwap(turno)}>
-                          <ArrowLeftRight className="h-3.5 w-3.5" />
-                          Scambio
+                          <ArrowLeftRight className="h-3.5 w-3.5" />Scambio
                         </Button>
                       </div>
                     ))}
@@ -208,12 +298,13 @@ export default function Dashboard() {
             </Card>
           </div>
 
+          {/* Staff table */}
           <div className="lg:col-span-2">
             <Card className="glass border-white/8 shadow-none">
               <CardHeader className="pb-3">
                 <CardTitle className="text-sm font-semibold text-muted-foreground uppercase tracking-wide flex items-center justify-between">
                   Staff — Ore
-                  {canManage && <span className="text-[10px] font-normal text-muted-foreground/50 normal-case">Clicca per preferenze</span>}
+                  {canManage && <span className="text-[10px] font-normal text-muted-foreground/50 normal-case">Clicca per gestire</span>}
                 </CardTitle>
               </CardHeader>
               <CardContent className="p-0">
@@ -221,30 +312,46 @@ export default function Dashboard() {
                   <TableHeader>
                     <TableRow className="border-white/5 hover:bg-transparent">
                       <TableHead className="pl-6 text-muted-foreground text-xs">Nome</TableHead>
-                      <TableHead className="text-muted-foreground text-xs">Ruolo</TableHead>
+                      <TableHead className="text-muted-foreground text-xs">Stato</TableHead>
                       <TableHead className="text-right pr-6 text-muted-foreground text-xs">Ore</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {stats.slice().sort((a, b) => b.ore_totali - a.ore_totali).map((dip) => (
-                      <TableRow key={dip.id} className={`border-white/5 transition-colors ${dip.id === user?.id ? theme.bg : "hover:bg-white/3"} ${canManage ? "cursor-pointer" : ""}`} onClick={() => canManage && openPref(dip)}>
-                        <TableCell className="pl-6 font-medium text-foreground">
-                          <div className="flex items-center gap-2">
-                            {dip.id === user?.id && <User className="h-3.5 w-3.5 text-muted-foreground" />}
-                            {dip.nome}
-                          </div>
-                          {canManage && (dip.preferenze_turno ?? []).length < 3 && (
-                            <div className="flex gap-1 mt-0.5">
-                              {(dip.preferenze_turno ?? []).map((p) => (
-                                <span key={p} className="text-[9px] px-1 rounded bg-white/8 text-muted-foreground/60 font-mono">{p.slice(0, 3)}</span>
-                              ))}
+                    {stats.slice().sort((a, b) => b.ore_totali - a.ore_totali).map((dip) => {
+                      const absence = canManage ? getAbsenceToday(dip.id) : undefined;
+                      return (
+                        <TableRow
+                          key={dip.id}
+                          className={`border-white/5 transition-colors ${dip.id === user?.id ? theme.bg : "hover:bg-white/3"} ${canManage ? "cursor-pointer" : ""}`}
+                          onClick={() => canManage && openProfile(dip)}
+                        >
+                          <TableCell className="pl-6 font-medium text-foreground">
+                            <div className="flex items-center gap-2">
+                              {dip.id === user?.id && <User className="h-3.5 w-3.5 text-muted-foreground" />}
+                              {dip.nome}
                             </div>
-                          )}
-                        </TableCell>
-                        <TableCell><RoleBadge role={dip.ruolo} /></TableCell>
-                        <TableCell className="text-right pr-6 font-mono text-sm text-gold font-bold">{dip.ore_totali}</TableCell>
-                      </TableRow>
-                    ))}
+                            <RoleBadge role={dip.ruolo} className="mt-0.5 text-xs" />
+                          </TableCell>
+                          <TableCell>
+                            {absence ? (
+                              <span className={`inline-flex items-center gap-1 text-[9px] font-bold px-1.5 py-0.5 rounded border ${
+                                absence.tipo === "MALATTIA"
+                                  ? "bg-red-500/15 text-red-400 border-red-500/25"
+                                  : "bg-emerald-500/15 text-emerald-400 border-emerald-500/25"
+                              }`}>
+                                {absence.tipo === "MALATTIA"
+                                  ? <AlertTriangle className="h-2.5 w-2.5" />
+                                  : <Palmtree className="h-2.5 w-2.5" />}
+                                {absence.tipo === "MALATTIA" ? "Malattia" : "Ferie"}
+                              </span>
+                            ) : (
+                              <span className="text-[9px] font-semibold text-emerald-400/70 bg-emerald-500/8 border border-emerald-500/15 px-1.5 py-0.5 rounded">Attivo</span>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-right pr-6 font-mono text-sm text-gold font-bold">{dip.ore_totali}</TableCell>
+                        </TableRow>
+                      );
+                    })}
                   </TableBody>
                 </Table>
               </CardContent>
@@ -253,13 +360,176 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* Swap Dialog */}
+      {/* ── Staff Profile Dialog ── */}
+      <Dialog open={!!profileTarget} onOpenChange={(open) => !open && setProfileTarget(null)}>
+        <DialogContent className="glass-strong border-white/10 max-w-lg max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-3 text-foreground">
+              <div className={`h-9 w-9 rounded-xl ${ROLE_THEME[(profileTarget?.ruolo ?? "OSS") as Ruolo]?.avatar ?? ""} flex items-center justify-center font-bold text-sm`}>
+                {profileTarget?.nome.charAt(0)}
+              </div>
+              <div>
+                <p className="font-bold">{profileTarget?.nome}</p>
+                {profileTarget && <RoleBadge role={profileTarget.ruolo} className="text-xs" />}
+              </div>
+            </DialogTitle>
+          </DialogHeader>
+
+          {/* Tabs */}
+          <div className="flex gap-1 bg-white/4 rounded-xl p-1 mt-1">
+            {(["preferenze", "assenze"] as const).map((tab) => (
+              <button
+                key={tab}
+                onClick={() => setProfileTab(tab)}
+                className={`flex-1 py-2 rounded-lg text-xs font-semibold uppercase tracking-wide transition-all ${
+                  profileTab === tab
+                    ? "bg-amber-500/20 text-amber-400 border border-amber-500/30"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {tab === "preferenze" ? <span className="flex items-center justify-center gap-1.5"><Settings2 className="h-3 w-3" />Preferenze</span>
+                                      : <span className="flex items-center justify-center gap-1.5"><CalendarX className="h-3 w-3" />Assenze</span>}
+              </button>
+            ))}
+          </div>
+
+          {/* ── Tab: Preferenze ── */}
+          {profileTab === "preferenze" && (
+            <div className="space-y-4 mt-2">
+              <p className="text-xs text-muted-foreground">Tipi di turno assegnabili nella generazione automatica.</p>
+              <div className="space-y-2">
+                {PREF_OPTIONS.map(({ key, label, icon: Icon, color }) => {
+                  const active = prefSelected.includes(key);
+                  return (
+                    <button key={key} type="button" onClick={() => setPrefSelected((prev) => prev.includes(key) ? prev.filter((p) => p !== key) : [...prev, key])}
+                      className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl border transition-all text-left ${active ? color : "bg-white/3 border-white/8 text-muted-foreground hover:bg-white/6"}`}>
+                      <Icon className="h-4 w-4 shrink-0" />
+                      <span className="font-semibold text-sm flex-1">{label}</span>
+                      {active && <Check className="h-4 w-4 shrink-0" />}
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="flex gap-3 pt-1">
+                <Button variant="outline" className="flex-1 border-white/10 hover:bg-white/5" onClick={() => setProfileTarget(null)}>Chiudi</Button>
+                <button onClick={savePref} disabled={prefLoading || prefSelected.length === 0}
+                  className="flex-1 rounded-lg font-bold text-sm flex items-center justify-center gap-2 glow-gold py-2 disabled:opacity-50"
+                  style={{ background: "linear-gradient(135deg, #f59e0b, #d97706)", color: "#0f172a" }}>
+                  {prefLoading ? "Salvo..." : "Salva Preferenze"}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* ── Tab: Assenze ── */}
+          {profileTab === "assenze" && (
+            <div className="space-y-5 mt-2">
+              {/* Add new absence form */}
+              <div className="rounded-2xl bg-white/3 border border-white/8 p-4 space-y-3">
+                <p className="text-xs font-bold text-muted-foreground uppercase tracking-wide flex items-center gap-1.5">
+                  <PlusCircle className="h-3.5 w-3.5 text-amber-400" />
+                  Registra Assenza
+                </p>
+                <form onSubmit={handleAddAssenza} className="space-y-3">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1.5">
+                      <Label className="text-muted-foreground text-xs">Tipo</Label>
+                      <Select value={newAssenza.tipo} onValueChange={(v) => setNewAssenza({ ...newAssenza, tipo: v as "MALATTIA" | "FERIE" })}>
+                        <SelectTrigger className="border-white/10 bg-white/5 h-9 text-sm"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="MALATTIA">🤒 Malattia</SelectItem>
+                          <SelectItem value="FERIE">🌴 Ferie</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-muted-foreground text-xs">Note (opzionale)</Label>
+                      <Input value={newAssenza.note} onChange={(e) => setNewAssenza({ ...newAssenza, note: e.target.value })} placeholder="Es. certificato medico" className="border-white/10 bg-white/5 h-9 text-sm" />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1.5">
+                      <Label className="text-muted-foreground text-xs">Dal</Label>
+                      <Input type="date" value={newAssenza.data_inizio} onChange={(e) => setNewAssenza({ ...newAssenza, data_inizio: e.target.value })} required className="border-white/10 bg-white/5 h-9 text-sm" />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-muted-foreground text-xs">Al</Label>
+                      <Input type="date" value={newAssenza.data_fine} onChange={(e) => setNewAssenza({ ...newAssenza, data_fine: e.target.value })} min={newAssenza.data_inizio} required className="border-white/10 bg-white/5 h-9 text-sm" />
+                    </div>
+                  </div>
+                  <button type="submit" disabled={addingAssenza}
+                    className="w-full py-2 rounded-lg font-bold text-sm flex items-center justify-center gap-2 glow-gold disabled:opacity-50"
+                    style={{ background: "linear-gradient(135deg, #f59e0b, #d97706)", color: "#0f172a" }}>
+                    <PlusCircle className="h-4 w-4" />
+                    {addingAssenza ? "Salvataggio..." : "Salva Assenza"}
+                  </button>
+                </form>
+              </div>
+
+              {/* Absence history */}
+              <div className="space-y-2">
+                <p className="text-xs font-bold text-muted-foreground uppercase tracking-wide">
+                  Storico assenze — {profileTarget?.nome}
+                </p>
+                {assenzeLoading ? (
+                  <p className="text-sm text-muted-foreground text-center py-4">Caricamento...</p>
+                ) : assenze.length === 0 ? (
+                  <div className="rounded-xl bg-white/3 border border-white/8 p-6 text-center">
+                    <CalendarX className="h-6 w-6 text-muted-foreground/20 mx-auto mb-2" />
+                    <p className="text-sm text-muted-foreground">Nessuna assenza registrata</p>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {assenze.map((a) => {
+                      const active = isActiveToday(a, today);
+                      return (
+                        <div key={a.id} className={`flex items-center gap-3 p-3 rounded-xl border transition-all ${
+                          active
+                            ? a.tipo === "MALATTIA"
+                              ? "bg-red-500/8 border-red-500/20"
+                              : "bg-emerald-500/8 border-emerald-500/20"
+                            : "bg-white/3 border-white/8"
+                        }`}>
+                          <div className={`p-2 rounded-lg shrink-0 ${
+                            a.tipo === "MALATTIA" ? "bg-red-500/15 text-red-400" : "bg-emerald-500/15 text-emerald-400"
+                          }`}>
+                            {a.tipo === "MALATTIA" ? <AlertTriangle className="h-4 w-4" /> : <Palmtree className="h-4 w-4" />}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2">
+                              <span className={`text-xs font-bold ${a.tipo === "MALATTIA" ? "text-red-300" : "text-emerald-300"}`}>
+                                {a.tipo === "MALATTIA" ? "Malattia" : "Ferie"}
+                              </span>
+                              {active && (
+                                <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400 border border-amber-500/30 uppercase">In corso</span>
+                              )}
+                            </div>
+                            <p className="text-xs text-muted-foreground mt-0.5">
+                              {formatDate(a.data_inizio)} → {formatDate(a.data_fine)}
+                            </p>
+                            {a.note && <p className="text-xs text-muted-foreground/60 mt-0.5 truncate">{a.note}</p>}
+                          </div>
+                          <Button variant="ghost" size="icon" onClick={() => handleDeleteAssenza(a.id)}
+                            className="h-7 w-7 shrink-0 text-red-400/40 hover:text-red-400 hover:bg-red-500/10">
+                            <Trash2 className="h-3 w-3" />
+                          </Button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Swap Dialog ── */}
       <Dialog open={swapOpen} onOpenChange={setSwapOpen}>
         <DialogContent className="max-w-md glass-strong border-white/10">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-foreground">
-              <ArrowLeftRight className="h-5 w-5 text-amber-400" />
-              Richiedi Scambio Turno
+              <ArrowLeftRight className="h-5 w-5 text-amber-400" />Richiedi Scambio Turno
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-5">
@@ -304,42 +574,11 @@ export default function Dashboard() {
             </div>
             <div className="flex gap-3">
               <Button variant="outline" className="flex-1 border-white/10 hover:bg-white/5" onClick={() => setSwapOpen(false)}>Annulla</Button>
-              <button onClick={submitSwap} disabled={swapLoading || !colleagueId} className="flex-1 rounded-lg font-bold text-sm gap-2 flex items-center justify-center glow-gold py-2 disabled:opacity-50" style={{ background: "linear-gradient(135deg, #f59e0b, #d97706)", color: "#0f172a" }}>
+              <button onClick={submitSwap} disabled={swapLoading || !colleagueId}
+                className="flex-1 rounded-lg font-bold text-sm gap-2 flex items-center justify-center glow-gold py-2 disabled:opacity-50"
+                style={{ background: "linear-gradient(135deg, #f59e0b, #d97706)", color: "#0f172a" }}>
                 <ArrowLeftRight className="h-4 w-4" />
                 {swapLoading ? "Invio..." : "Invia Richiesta"}
-              </button>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      {/* Preference Dialog */}
-      <Dialog open={!!prefTarget} onOpenChange={(open) => !open && setPrefTarget(null)}>
-        <DialogContent className="max-w-sm glass-strong border-white/10">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-foreground">
-              <Settings2 className="h-5 w-5 text-amber-400" />
-              Preferenze — {prefTarget?.nome}
-            </DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4">
-            <p className="text-xs text-muted-foreground">Tipi di turno assegnabili in fase di generazione automatica.</p>
-            <div className="space-y-2">
-              {PREF_OPTIONS.map(({ key, label, icon: Icon, color }) => {
-                const active = prefSelected.includes(key);
-                return (
-                  <button key={key} type="button" onClick={() => togglePref(key)} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl border transition-all text-left ${active ? color : "bg-white/3 border-white/8 text-muted-foreground hover:bg-white/6"}`}>
-                    <Icon className="h-4 w-4 shrink-0" />
-                    <span className="font-semibold text-sm flex-1">{label}</span>
-                    {active && <Check className="h-4 w-4 shrink-0" />}
-                  </button>
-                );
-              })}
-            </div>
-            <div className="flex gap-3">
-              <Button variant="outline" className="flex-1 border-white/10 hover:bg-white/5" onClick={() => setPrefTarget(null)}>Annulla</Button>
-              <button onClick={savePref} disabled={prefLoading || prefSelected.length === 0} className="flex-1 rounded-lg font-bold text-sm flex items-center justify-center gap-2 glow-gold py-2 disabled:opacity-50" style={{ background: "linear-gradient(135deg, #f59e0b, #d97706)", color: "#0f172a" }}>
-                {prefLoading ? "Salvo..." : "Salva"}
               </button>
             </div>
           </div>

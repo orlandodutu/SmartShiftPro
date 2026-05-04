@@ -79,6 +79,29 @@ class Turno(db.Model):
         }
 
 
+class Assenza(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    dipendente_id = db.Column(db.Integer, db.ForeignKey('dipendente.id'), nullable=False)
+    tipo = db.Column(db.String(20), nullable=False, default='MALATTIA')  # MALATTIA | FERIE
+    data_inizio = db.Column(db.String(10), nullable=False)
+    data_fine = db.Column(db.String(10), nullable=False)
+    note = db.Column(db.String(200), default='')
+    creata_il = db.Column(db.String(20), default='')
+    dipendente = db.relationship('Dipendente', backref=db.backref('assenze', lazy=True))
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'dipendente_id': self.dipendente_id,
+            'nome_dipendente': self.dipendente.nome if self.dipendente else '',
+            'tipo': self.tipo,
+            'data_inizio': self.data_inizio,
+            'data_fine': self.data_fine,
+            'note': self.note,
+            'creata_il': self.creata_il,
+        }
+
+
 class RichiestaScambio(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     richiedente_id = db.Column(db.Integer, db.ForeignKey('dipendente.id'), nullable=False)
@@ -246,6 +269,60 @@ def aggiorna_dipendente(id):
     return jsonify(d.to_dict())
 
 
+@api.route('/api/assenze', methods=['GET'])
+def get_assenze():
+    if 'user_id' not in session:
+        return jsonify({'errore': 'Non autenticato'}), 401
+    dip_id = request.args.get('dipendente_id')
+    query = Assenza.query
+    if dip_id:
+        query = query.filter_by(dipendente_id=int(dip_id))
+    assenze = query.order_by(Assenza.data_inizio.desc()).all()
+    return jsonify([a.to_dict() for a in assenze])
+
+
+@api.route('/api/assenze', methods=['POST'])
+def aggiungi_assenza():
+    if 'user_id' not in session:
+        return jsonify({'errore': 'Non autenticato'}), 401
+    richiedente = db.session.get(Dipendente, session['user_id'])
+    if not richiedente or not (richiedente.is_admin or richiedente.ruolo == 'CAPOSALA'):
+        return jsonify({'errore': 'Non autorizzato'}), 403
+    data = request.json
+    dip_id    = data.get('dipendente_id')
+    tipo      = str(data.get('tipo', 'MALATTIA'))[:20]
+    d_inizio  = str(data.get('data_inizio', ''))[:10]
+    d_fine    = str(data.get('data_fine',   ''))[:10]
+    note      = str(data.get('note', ''))[:200]
+    if not dip_id or not d_inizio or not d_fine:
+        return jsonify({'errore': 'Dati mancanti'}), 400
+    if d_inizio > d_fine:
+        return jsonify({'errore': 'Data inizio deve precedere la data fine'}), 400
+    assenza = Assenza(
+        dipendente_id=int(dip_id), tipo=tipo,
+        data_inizio=d_inizio, data_fine=d_fine,
+        note=note, creata_il=datetime.now().strftime('%Y-%m-%d %H:%M')
+    )
+    db.session.add(assenza)
+    db.session.commit()
+    return jsonify(assenza.to_dict()), 201
+
+
+@api.route('/api/assenze/<int:id>', methods=['DELETE'])
+def elimina_assenza(id):
+    if 'user_id' not in session:
+        return jsonify({'errore': 'Non autenticato'}), 401
+    richiedente = db.session.get(Dipendente, session['user_id'])
+    if not richiedente or not (richiedente.is_admin or richiedente.ruolo == 'CAPOSALA'):
+        return jsonify({'errore': 'Non autorizzato'}), 403
+    assenza = db.session.get(Assenza, id)
+    if not assenza:
+        return jsonify({'errore': 'Assenza non trovata'}), 404
+    db.session.delete(assenza)
+    db.session.commit()
+    return jsonify({'success': True})
+
+
 @api.route('/api/dipendenti/<int:id>', methods=['DELETE'])
 def elimina_dipendente(id):
     d = Dipendente.query.get_or_404(id)
@@ -393,6 +470,13 @@ def genera_turni():
         # IDs already assigned today (existing or created this loop)
         gia = {t.dipendente_id for t in Turno.query.filter_by(data=data_str).all()}
 
+        # Staff absent (MALATTIA/FERIE) for this day
+        assenze_oggi = Assenza.query.filter(
+            Assenza.data_inizio <= data_str,
+            Assenza.data_fine   >= data_str
+        ).all()
+        assenti_ids = {a.dipendente_id for a in assenze_oggi}
+
         def crea(dip, tipo, ore_override=None):
             nonlocal generati, saltati
             if dip.id in gia:
@@ -408,6 +492,12 @@ def genera_turni():
             elif tipo == 'MALATTIA': dip.malattia  += 1
             generati += 1
             return True
+
+        # ── 0. Pre-assign absence shifts so absent staff are excluded from coverage ──
+        for assenza in assenze_oggi:
+            dip_assente = db.session.get(Dipendente, assenza.dipendente_id)
+            if dip_assente and dip_assente.id not in gia:
+                crea(dip_assente, assenza.tipo)  # MALATTIA or FERIE
 
         # ── 1. INFERMIERA (Anna): MATTINO Mon–Fri, rest Sun always, alt-Sat ──
         for dip in infermieri:
@@ -831,6 +921,8 @@ if __name__ == '__main__':
                 conn.commit()
         except Exception:
             pass
+        # Ensure assenza table exists
+        db.create_all()
         inizializza_staff()
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port, debug=False)

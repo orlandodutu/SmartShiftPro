@@ -22,10 +22,21 @@ export type Turno = {
   dipendente_id: number;
   nome: string;
   ruolo: string;
-  data: string; // YYYY-MM-DD
+  data: string;
   tipo: TipoTurno;
   ore: number;
   note: string;
+};
+
+export type Assenza = {
+  id: number;
+  dipendente_id: number;
+  nome_dipendente: string;
+  tipo: 'MALATTIA' | 'FERIE';
+  data_inizio: string;
+  data_fine: string;
+  note: string;
+  creata_il: string;
 };
 
 export type StatoScambio = 'IN_ATTESA' | 'APPROVATA' | 'RIFIUTATA';
