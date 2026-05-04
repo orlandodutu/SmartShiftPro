@@ -32,7 +32,7 @@ const ROLE_DOT: Record<Ruolo, string> = {
 };
 
 export function AppLayout({ children }: { children: ReactNode }) {
-  useSwapNotifications();
+  const { pendingCount } = useSwapNotifications();
   const { user, logout } = useAuth();
   const [location] = useLocation();
   const role = (user?.ruolo ?? "OSS") as Ruolo;
@@ -125,6 +125,11 @@ export function AppLayout({ children }: { children: ReactNode }) {
                   isActive ? (isMonitor ? "text-indigo-400" : "text-amber-400") : "text-muted-foreground"
                 }`} />
                 {item.label}
+                {item.href === "/scambi" && pendingCount > 0 && (
+                  <span className="ml-auto min-w-[1.25rem] h-5 px-1.5 rounded-full bg-amber-500 text-[10px] font-black text-slate-900 flex items-center justify-center animate-pulse">
+                    {pendingCount > 9 ? "9+" : pendingCount}
+                  </span>
+                )}
                 {item.href === "/caposala" && (
                   <span className={`ml-auto h-1.5 w-1.5 rounded-full ${dotClass}`} />
                 )}
