@@ -324,7 +324,7 @@ export default function Turni() {
                             <span className="text-[10px] text-muted-foreground/50 font-mono shrink-0">{turno.ora_inizio}</span>
                           )}
                           {turno.manuale && (
-                            <Lock className="h-3 w-3 text-amber-400/60 shrink-0" title="Turno manuale — non verrà sovrascritto" />
+                            <Lock className="h-3 w-3 text-amber-400/60 shrink-0" aria-label="Turno manuale — non verrà sovrascritto" />
                           )}
                           {canManage && (
                             <div className="flex gap-1 shrink-0">

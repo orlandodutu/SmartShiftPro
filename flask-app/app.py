@@ -739,6 +739,27 @@ def get_archivio_mese(mese):
     return jsonify([t.to_dict() for t in turni])
 
 
+@api.route('/api/reset_completo', methods=['POST'])
+def reset_completo():
+    if 'user_id' not in session:
+        return jsonify({'errore': 'Non autenticato'}), 401
+    richiedente = db.session.get(Dipendente, session['user_id'])
+    if not richiedente or not richiedente.is_admin:
+        return jsonify({'errore': 'Non autorizzato — solo admin'}), 403
+    # Delete ALL shifts and swap requests and absences
+    RichiestaScambio.query.delete()
+    Assenza.query.delete()
+    Turno.query.delete()
+    # Reset all stats (except CAPOSALA ore_totali stays 0)
+    for d in Dipendente.query.all():
+        d.ore_totali = 0
+        d.notti_fatte = 0
+        d.ferie = 0
+        d.malattia = 0
+    db.session.commit()
+    return jsonify({'success': True})
+
+
 @api.route('/api/turni/reset_mese', methods=['POST'])
 def reset_mese():
     if 'user_id' not in session:

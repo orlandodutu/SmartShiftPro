@@ -15,7 +15,7 @@ import { useToast } from "@/hooks/use-toast";
 import {
   Clock, Moon, CalendarOff, Pill, ArrowLeftRight, User,
   Settings2, Sun, Sunset, BedDouble, Check, Trash2,
-  PlusCircle, AlertTriangle, Palmtree, CalendarX,
+  PlusCircle, AlertTriangle, Palmtree, CalendarX, RotateCcw, ShieldAlert,
 } from "lucide-react";
 import type { Ruolo } from "@/lib/api";
 
@@ -57,6 +57,26 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [dipendenti, setDipendenti] = useState<Dipendente[]>([]);
   const [tutteAssenze, setTutteAssenze] = useState<Assenza[]>([]);
+
+  /* Reset completo */
+  const [resetOpen, setResetOpen] = useState(false);
+  const [resetLoading, setResetLoading] = useState(false);
+  const handleResetCompleto = async () => {
+    setResetLoading(true);
+    try {
+      const res = await fetch("/flask-api/api/reset_completo", {
+        method: "POST", credentials: "include",
+      });
+      if (res.ok) {
+        toast({ title: "Sistema azzerato — turni, scambi e statistiche eliminati" });
+        setResetOpen(false);
+        await fetchData();
+      } else {
+        const err = await res.json();
+        toast({ title: err.errore || "Errore nel reset", variant: "destructive" });
+      }
+    } finally { setResetLoading(false); }
+  };
 
   /* Swap state */
   const [swapOpen, setSwapOpen] = useState(false);
@@ -233,7 +253,7 @@ export default function Dashboard() {
           <div className={`h-16 w-16 rounded-2xl ${theme.avatar} flex items-center justify-center text-2xl font-black`}>
             {user?.nome.charAt(0)}
           </div>
-          <div>
+          <div className="flex-1">
             <div className="flex items-center gap-3 mb-1">
               <h1 className="text-2xl font-bold text-foreground">{user?.nome}</h1>
               <RoleBadge role={role} />
@@ -242,6 +262,17 @@ export default function Dashboard() {
               {role === "CAPOSALA" ? "Coordinatrice — Area riservata disponibile nel menu" : "Dashboard personale"}
             </p>
           </div>
+          {user?.is_admin && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setResetOpen(true)}
+              className="shrink-0 gap-2 border-red-500/30 text-red-400/70 hover:text-red-400 hover:bg-red-500/10 hover:border-red-500/50 transition-all"
+            >
+              <RotateCcw className="h-3.5 w-3.5" />
+              <span className="hidden sm:inline">Reset Sistema</span>
+            </Button>
+          )}
         </div>
       </div>
 
@@ -521,6 +552,53 @@ export default function Dashboard() {
               </div>
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Reset Completo Dialog ── */}
+      <Dialog open={resetOpen} onOpenChange={(open) => !open && !resetLoading && setResetOpen(false)}>
+        <DialogContent className="glass-strong border-white/10 max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-red-400">
+              <RotateCcw className="h-5 w-5" />
+              Reset Completo Sistema
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="rounded-xl bg-red-500/8 border border-red-500/20 p-4 space-y-2">
+              <div className="flex items-center gap-2">
+                <ShieldAlert className="h-4 w-4 text-red-400 shrink-0" />
+                <p className="text-sm font-semibold text-red-300">Azione irreversibile</p>
+              </div>
+              <p className="text-xs text-muted-foreground">Verranno eliminati permanentemente:</p>
+              <ul className="text-xs text-muted-foreground space-y-0.5 ml-3">
+                <li>• Tutti i turni (manuali e automatici)</li>
+                <li>• Tutte le richieste di scambio</li>
+                <li>• Tutte le assenze registrate</li>
+                <li>• Contatori ore, notti, ferie e malattia</li>
+              </ul>
+              <p className="text-xs text-amber-400/80 mt-2 font-medium">Gli account e le preferenze dei dipendenti vengono mantenuti.</p>
+            </div>
+            <div className="flex gap-3">
+              <Button
+                variant="outline"
+                className="flex-1 border-white/10 hover:bg-white/5"
+                onClick={() => setResetOpen(false)}
+                disabled={resetLoading}
+              >
+                Annulla
+              </Button>
+              <Button
+                className="flex-1 bg-red-600 hover:bg-red-500 text-white gap-2"
+                onClick={handleResetCompleto}
+                disabled={resetLoading}
+                data-testid="confirm-reset"
+              >
+                <RotateCcw className="h-4 w-4" />
+                {resetLoading ? "Reset in corso..." : "Azzera Tutto"}
+              </Button>
+            </div>
+          </div>
         </DialogContent>
       </Dialog>
 
