@@ -111,6 +111,7 @@ export default function Dashboard() {
   /* Reset completo */
   const [resetOpen, setResetOpen] = useState(false);
   const [resetLoading, setResetLoading] = useState(false);
+  const [resetConfirmInput, setResetConfirmInput] = useState("");
   const handleResetCompleto = async () => {
     setResetLoading(true);
     try {
@@ -682,7 +683,7 @@ export default function Dashboard() {
       </Dialog>
 
       {/* ── Reset Completo Dialog ── */}
-      <Dialog open={resetOpen} onOpenChange={(open) => !open && !resetLoading && setResetOpen(false)}>
+      <Dialog open={resetOpen} onOpenChange={(open) => { if (!open && !resetLoading) { setResetOpen(false); setResetConfirmInput(""); } }}>
         <DialogContent className="glass-strong border-white/10 max-w-sm">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-red-400">
@@ -699,25 +700,38 @@ export default function Dashboard() {
               <p className="text-xs text-muted-foreground">Verranno eliminati permanentemente:</p>
               <ul className="text-xs text-muted-foreground space-y-0.5 ml-3">
                 <li>• Tutti i turni (manuali e automatici)</li>
+                <li>• <span className="text-red-400 font-semibold">Tutto l'archivio storico</span></li>
                 <li>• Tutte le richieste di scambio</li>
                 <li>• Tutte le assenze registrate</li>
                 <li>• Contatori ore, notti, ferie e malattia</li>
               </ul>
               <p className="text-xs text-amber-400/80 mt-2 font-medium">Gli account e le preferenze dei dipendenti vengono mantenuti.</p>
             </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs text-muted-foreground">
+                Digita <span className="font-bold text-red-400">RESET</span> per sbloccare il pulsante
+              </Label>
+              <Input
+                value={resetConfirmInput}
+                onChange={(e) => setResetConfirmInput(e.target.value)}
+                placeholder="RESET"
+                className="border-red-500/30 bg-red-500/5 text-foreground placeholder:text-muted-foreground/30 focus:border-red-400/50"
+                disabled={resetLoading}
+              />
+            </div>
             <div className="flex gap-3">
               <Button
                 variant="outline"
                 className="flex-1 border-white/10 hover:bg-white/5"
-                onClick={() => setResetOpen(false)}
+                onClick={() => { setResetOpen(false); setResetConfirmInput(""); }}
                 disabled={resetLoading}
               >
                 Annulla
               </Button>
               <Button
-                className="flex-1 bg-red-600 hover:bg-red-500 text-white gap-2"
+                className="flex-1 bg-red-600 hover:bg-red-500 text-white gap-2 disabled:opacity-30 disabled:cursor-not-allowed"
                 onClick={handleResetCompleto}
-                disabled={resetLoading}
+                disabled={resetLoading || resetConfirmInput !== "RESET"}
                 data-testid="confirm-reset"
               >
                 <RotateCcw className="h-4 w-4" />
