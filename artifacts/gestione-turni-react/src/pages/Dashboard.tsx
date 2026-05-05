@@ -16,8 +16,19 @@ import {
   Clock, Moon, CalendarOff, Pill, ArrowLeftRight, User,
   Settings2, Sun, Sunset, BedDouble, Check, Trash2,
   PlusCircle, AlertTriangle, Palmtree, CalendarX, RotateCcw, ShieldAlert, UserPlus, KeyRound,
+  Sparkles, ChevronDown,
 } from "lucide-react";
+
 import type { Ruolo } from "@/lib/api";
+
+interface SuggeritoCandidate {
+  dipendente: Dipendente;
+  score: number;
+  motivi: string[];
+  avvisi: string[];
+  turno_quel_giorno: Turno | null;
+  compatibilita: "ottima" | "buona" | "discreta" | "bassa";
+}
 
 /* ── Role theme ── */
 const ROLE_THEME: Record<Ruolo, { bg: string; border: string; accent: string; avatar: string; dot: string }> = {
@@ -137,6 +148,9 @@ export default function Dashboard() {
   const [colleagueTurnoId, setColleagueTurnoId] = useState("");
   const [swapNota, setSwapNota] = useState("");
   const [swapLoading, setSwapLoading] = useState(false);
+  const [suggeriti, setSuggeriti] = useState<SuggeritoCandidate[]>([]);
+  const [suggeritiLoading, setSuggeritiLoading] = useState(false);
+  const [showAllColleghi, setShowAllColleghi] = useState(false);
 
   /* Staff profile modal */
   const [profileTarget, setProfileTarget] = useState<Dipendente | null>(null);
@@ -279,7 +293,25 @@ export default function Dashboard() {
 
   /* ── Swap ── */
   const openSwap = (turno: Turno) => {
-    setSwapTurno(turno); setColleagueId(""); setColleagueTurnoId(""); setSwapNota(""); setSwapOpen(true);
+    setSwapTurno(turno);
+    setColleagueId("");
+    setColleagueTurnoId("");
+    setSwapNota("");
+    setSuggeriti([]);
+    setShowAllColleghi(false);
+    setSwapOpen(true);
+    // Fetch smart suggestions
+    setSuggeritiLoading(true);
+    fetch(`/flask-api/api/scambi/suggeriti?turno_id=${turno.id}`, { credentials: "include" })
+      .then((r) => r.ok ? r.json() : [])
+      .then(setSuggeriti)
+      .catch(() => setSuggeriti([]))
+      .finally(() => setSuggeritiLoading(false));
+  };
+
+  const selectSuggerito = (s: SuggeritoCandidate) => {
+    setColleagueId(s.dipendente.id.toString());
+    setColleagueTurnoId(s.turno_quel_giorno ? s.turno_quel_giorno.id.toString() : "");
   };
   const submitSwap = async () => {
     if (!swapTurno || !colleagueId) { toast({ title: "Seleziona collega", variant: "destructive" }); return; }
@@ -807,57 +839,173 @@ export default function Dashboard() {
 
       {/* ── Swap Dialog ── */}
       <Dialog open={swapOpen} onOpenChange={setSwapOpen}>
-        <DialogContent className="max-w-md glass-strong border-white/10">
+        <DialogContent className="max-w-lg glass-strong border-white/10 max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-foreground">
               <ArrowLeftRight className="h-5 w-5 text-amber-400" />Richiedi Scambio Turno
             </DialogTitle>
           </DialogHeader>
-          <div className="space-y-5">
-            <div className="rounded-xl bg-white/5 border border-white/10 p-4">
-              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Turno da cedere</p>
+          <div className="space-y-4">
+            {/* Turno da cedere */}
+            <div className="rounded-xl bg-white/5 border border-white/10 p-3">
+              <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">Turno da cedere</p>
               {swapTurno && (
                 <div className="flex items-center gap-3">
                   <ShiftBadge type={swapTurno.tipo} />
-                  <span className="font-medium text-foreground">
-                    {new Date(swapTurno.data + "T00:00:00").toLocaleDateString("it-IT", { weekday: "long", day: "numeric", month: "long" })}
-                  </span>
+                  <div>
+                    <span className="font-semibold text-foreground text-sm">
+                      {new Date(swapTurno.data + "T00:00:00").toLocaleDateString("it-IT", { weekday: "long", day: "numeric", month: "long" })}
+                    </span>
+                    {swapTurno.nome && (
+                      <p className="text-xs text-muted-foreground">{swapTurno.nome}</p>
+                    )}
+                  </div>
                 </div>
               )}
             </div>
+
+            {/* ── Suggerimenti intelligenti ── */}
             <div className="space-y-2">
-              <Label className="text-muted-foreground">Collega</Label>
-              <Select value={colleagueId} onValueChange={(v) => { setColleagueId(v); setColleagueTurnoId(""); }}>
-                <SelectTrigger className="border-white/10 bg-white/5"><SelectValue placeholder="Seleziona..." /></SelectTrigger>
-                <SelectContent>
-                  {dipendenti.filter((d) => d.id !== user?.id).map((d) => (
-                    <SelectItem key={d.id} value={d.id.toString()}>{d.nome} — {d.ruolo}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <div className="flex items-center gap-2">
+                <Sparkles className="h-3.5 w-3.5 text-amber-400" />
+                <p className="text-xs font-semibold text-amber-400 uppercase tracking-wide">Suggeriti dall'algoritmo</p>
+              </div>
+
+              {suggeritiLoading ? (
+                <div className="flex items-center gap-2 px-3 py-4 rounded-xl bg-white/3 border border-white/6">
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-amber-400" />
+                  <span className="text-xs text-muted-foreground">Analisi in corso...</span>
+                </div>
+              ) : suggeriti.length === 0 ? (
+                <div className="px-3 py-3 rounded-xl bg-white/3 border border-white/6 text-xs text-muted-foreground">
+                  Nessun candidato disponibile per questo turno.
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {suggeriti.slice(0, 4).map((s) => {
+                    const isSelected = colleagueId === s.dipendente.id.toString();
+                    const compatColor = {
+                      ottima:   "text-emerald-400 bg-emerald-500/10 border-emerald-500/30",
+                      buona:    "text-amber-400  bg-amber-500/10  border-amber-500/30",
+                      discreta: "text-orange-400 bg-orange-500/10 border-orange-500/30",
+                      bassa:    "text-slate-400  bg-slate-500/10  border-slate-500/20",
+                    }[s.compatibilita];
+                    return (
+                      <button
+                        key={s.dipendente.id}
+                        onClick={() => selectSuggerito(s)}
+                        className={`w-full text-left rounded-xl border p-3 transition-all ${
+                          isSelected
+                            ? "border-amber-500/50 bg-amber-500/10 ring-1 ring-amber-500/30"
+                            : "border-white/8 bg-white/3 hover:bg-white/6 hover:border-white/15"
+                        }`}
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex items-center gap-2 min-w-0">
+                            {isSelected && <Check className="h-3.5 w-3.5 text-amber-400 shrink-0" />}
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="font-semibold text-foreground text-sm">{s.dipendente.nome}</span>
+                                <RoleBadge role={s.dipendente.ruolo} />
+                                {s.turno_quel_giorno && (
+                                  <ShiftBadge type={s.turno_quel_giorno.tipo} />
+                                )}
+                              </div>
+                              {s.motivi.length > 0 && (
+                                <p className="text-[10px] text-muted-foreground mt-1 leading-snug">
+                                  {s.motivi.slice(0, 2).join(" · ")}
+                                </p>
+                              )}
+                              {s.avvisi.length > 0 && (
+                                <p className="text-[10px] text-orange-400/80 mt-0.5">
+                                  ⚠ {s.avvisi[0]}
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                          <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full border shrink-0 uppercase tracking-wide ${compatColor}`}>
+                            {s.compatibilita}
+                          </span>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
             </div>
+
+            {/* ── Selezione manuale (espandibile) ── */}
+            <div className="space-y-2">
+              <button
+                onClick={() => setShowAllColleghi((v) => !v)}
+                className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+              >
+                <ChevronDown className={`h-3.5 w-3.5 transition-transform ${showAllColleghi ? "rotate-180" : ""}`} />
+                {showAllColleghi ? "Nascondi lista completa" : "Oppure scegli manualmente..."}
+              </button>
+
+              {showAllColleghi && (
+                <Select value={colleagueId} onValueChange={(v) => { setColleagueId(v); setColleagueTurnoId(""); }}>
+                  <SelectTrigger className="border-white/10 bg-white/5"><SelectValue placeholder="Seleziona collega..." /></SelectTrigger>
+                  <SelectContent>
+                    {dipendenti
+                      .filter((d) => d.id !== user?.id && d.ruolo !== "CAPOSALA" && !d.is_admin)
+                      .map((d) => (
+                        <SelectItem key={d.id} value={d.id.toString()}>
+                          {d.nome} — {d.ruolo === "INFERMIERA" ? "Infermiere/a" : d.ruolo}
+                        </SelectItem>
+                      ))}
+                  </SelectContent>
+                </Select>
+              )}
+            </div>
+
+            {/* Turno del collega selezionato */}
             {colleagueId && (
               <div className="space-y-2">
-                <Label className="text-muted-foreground">Turno del collega <span className="text-muted-foreground/60 font-normal">(opzionale)</span></Label>
+                <Label className="text-muted-foreground text-xs">
+                  Turno da ricevere in cambio{" "}
+                  <span className="text-muted-foreground/60 font-normal">(opzionale)</span>
+                </Label>
                 <Select value={colleagueTurnoId} onValueChange={setColleagueTurnoId}>
                   <SelectTrigger className="border-white/10 bg-white/5"><SelectValue placeholder="Nessuna preferenza" /></SelectTrigger>
                   <SelectContent>
                     {colleagueTurni.length === 0
-                      ? <SelectItem value="__none" disabled>Nessun turno</SelectItem>
-                      : colleagueTurni.map((t) => <SelectItem key={t.id} value={t.id.toString()}>{t.data} — {t.tipo}</SelectItem>)}
+                      ? <SelectItem value="__none" disabled>Nessun turno trovato</SelectItem>
+                      : colleagueTurni.map((t) => (
+                          <SelectItem key={t.id} value={t.id.toString()}>
+                            {new Date(t.data + "T00:00:00").toLocaleDateString("it-IT", { day: "numeric", month: "short" })} — {t.tipo}
+                          </SelectItem>
+                        ))}
                   </SelectContent>
                 </Select>
               </div>
             )}
+
+            {/* Motivazione */}
             <div className="space-y-2">
-              <Label className="text-muted-foreground">Motivazione <span className="text-muted-foreground/60 font-normal">(opzionale)</span></Label>
-              <Textarea placeholder="Es. Motivi famigliari..." value={swapNota} onChange={(e) => setSwapNota(e.target.value)} rows={3} className="border-white/10 bg-white/5 resize-none" />
+              <Label className="text-muted-foreground text-xs">
+                Motivazione <span className="text-muted-foreground/60 font-normal">(opzionale)</span>
+              </Label>
+              <Textarea
+                placeholder="Es. Motivi famigliari..."
+                value={swapNota}
+                onChange={(e) => setSwapNota(e.target.value)}
+                rows={2}
+                className="border-white/10 bg-white/5 resize-none text-sm"
+              />
             </div>
+
             <div className="flex gap-3">
-              <Button variant="outline" className="flex-1 border-white/10 hover:bg-white/5" onClick={() => setSwapOpen(false)}>Annulla</Button>
-              <button onClick={submitSwap} disabled={swapLoading || !colleagueId}
+              <Button variant="outline" className="flex-1 border-white/10 hover:bg-white/5" onClick={() => setSwapOpen(false)}>
+                Annulla
+              </Button>
+              <button
+                onClick={submitSwap}
+                disabled={swapLoading || !colleagueId}
                 className="flex-1 rounded-lg font-bold text-sm gap-2 flex items-center justify-center glow-gold py-2 disabled:opacity-50"
-                style={{ background: "linear-gradient(135deg, #f59e0b, #d97706)", color: "#0f172a" }}>
+                style={{ background: "linear-gradient(135deg, #f59e0b, #d97706)", color: "#0f172a" }}
+              >
                 <ArrowLeftRight className="h-4 w-4" />
                 {swapLoading ? "Invio..." : "Invia Richiesta"}
               </button>

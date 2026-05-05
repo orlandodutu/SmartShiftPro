@@ -980,6 +980,161 @@ def reset_mese():
     return jsonify({'success': True, 'eliminati': eliminati, 'mese': mese})
 
 
+@api.route('/api/scambi/suggeriti', methods=['GET'])
+def suggeriti_scambio():
+    """Return ranked candidates for a shift swap, with score and reasons."""
+    if 'user_id' not in session:
+        return jsonify({'errore': 'Non autenticato'}), 401
+    richiedente = db.session.get(Dipendente, session['user_id'])
+    if not richiedente or not (richiedente.is_admin or richiedente.ruolo == 'CAPOSALA'):
+        return jsonify({'errore': 'Non autorizzato'}), 403
+
+    turno_id = request.args.get('turno_id', type=int)
+    if not turno_id:
+        return jsonify({'errore': 'turno_id richiesto'}), 400
+
+    turno = db.session.get(Turno, turno_id)
+    if not turno:
+        return jsonify({'errore': 'Turno non trovato'}), 404
+
+    richiedente_dip = db.session.get(Dipendente, turno.dipendente_id)
+    if not richiedente_dip:
+        return jsonify({'errore': 'Dipendente non trovato'}), 404
+
+    data_turno = turno.data
+    tipo_turno = turno.tipo
+    ruolo_richiedente = richiedente_dip.ruolo
+    prefs_richiedente = set((richiedente_dip.preferenze_turno or 'MATTINO,POMERIGGIO,NOTTE').split(','))
+
+    # Fetch all staff except requester, CAPOSALA, DEV/admin
+    candidati = Dipendente.query.filter(
+        Dipendente.id != richiedente_dip.id,
+        Dipendente.ruolo != 'CAPOSALA',
+        Dipendente.is_admin == False,
+    ).all()
+
+    # Pre-fetch turni on that day for all candidates
+    turni_quel_giorno = {
+        t.dipendente_id: t
+        for t in Turno.query.filter_by(data=data_turno).all()
+        if t.dipendente_id != richiedente_dip.id
+    }
+
+    # Pre-fetch absences covering that day
+    assenti_ids = set()
+    for a in Assenza.query.all():
+        if a.data_inizio <= data_turno <= a.data_fine:
+            assenti_ids.add(a.dipendente_id)
+
+    # Pending swap counts per person (too many pending = less available)
+    from sqlalchemy import func
+    pending_counts = dict(
+        db.session.query(RichiestaScambio.destinatario_id, func.count(RichiestaScambio.id))
+        .filter_by(stato='IN_ATTESA')
+        .group_by(RichiestaScambio.destinatario_id)
+        .all()
+    )
+
+    # Weekly night count (to avoid overloading night workers)
+    try:
+        from datetime import datetime as _dt, timedelta as _td
+        d = _dt.strptime(data_turno, '%Y-%m-%d').date()
+        week_start = (d - _td(days=d.weekday())).strftime('%Y-%m-%d')
+        week_end   = (d + _td(days=6 - d.weekday())).strftime('%Y-%m-%d')
+        notti_settimana = dict(
+            db.session.query(Turno.dipendente_id, func.count(Turno.id))
+            .filter(Turno.tipo == 'NOTTE', Turno.data >= week_start, Turno.data <= week_end)
+            .group_by(Turno.dipendente_id)
+            .all()
+        )
+    except Exception:
+        notti_settimana = {}
+
+    risultati = []
+    for cand in candidati:
+        score = 0
+        motivi = []
+        avvisi = []
+
+        # ── Hard exclusions ──
+        if cand.id in assenti_ids:
+            continue  # skip entirely if absent that day
+
+        turno_cand = turni_quel_giorno.get(cand.id)
+
+        # Skip if they have RIPOSO that day (off day — not swappable)
+        if turno_cand and turno_cand.tipo == 'RIPOSO':
+            avvisi.append('Riposo programmato')
+            score -= 25
+
+        # ── Positive scoring ──
+
+        # Same professional role (essential for coverage)
+        if cand.ruolo == ruolo_richiedente:
+            score += 30
+            motivi.append('Stesso ruolo')
+
+        # Has a shift that day → real swap possible
+        if turno_cand and turno_cand.tipo not in ('RIPOSO', 'FERIE', 'MALATTIA'):
+            score += 25
+            motivi.append(f'Ha turno {turno_cand.tipo} quel giorno')
+        elif turno_cand and turno_cand.tipo in ('FERIE', 'MALATTIA'):
+            avvisi.append('In ferie/malattia quel giorno')
+            score -= 30
+        else:
+            # No shift that day — could take the shift (gift, not swap)
+            score += 5
+
+        # Candidate prefers the shift type they'd be receiving (tipo_turno)
+        prefs_cand = set((cand.preferenze_turno or 'MATTINO,POMERIGGIO,NOTTE').split(','))
+        if tipo_turno in prefs_cand:
+            score += 15
+            motivi.append('Preferisce questo tipo di turno')
+
+        # If real swap: requester prefers what they'd be receiving from candidate
+        if turno_cand and turno_cand.tipo in prefs_richiedente:
+            score += 10
+            motivi.append('Scambio compatibile con le preferenze')
+
+        # Workload balance: candidate has fewer hours
+        if cand.ore_totali < richiedente_dip.ore_totali:
+            score += 10
+            motivi.append('Carico orario inferiore')
+
+        # Too many nights this week? penalise if swapping another night
+        if tipo_turno == 'NOTTE' and notti_settimana.get(cand.id, 0) >= 2:
+            avvisi.append('Già 2+ notti questa settimana')
+            score -= 15
+
+        # Pending swaps already open towards this person
+        pending = pending_counts.get(cand.id, 0)
+        if pending >= 2:
+            avvisi.append(f'{pending} scambi già in attesa')
+            score -= 10
+
+        # Fewer nights overall (night balance)
+        if cand.notti_fatte < richiedente_dip.notti_fatte:
+            score += 5
+            motivi.append('Meno notti totali')
+
+        risultati.append({
+            'dipendente': cand.to_dict(),
+            'score': score,
+            'motivi': motivi,
+            'avvisi': avvisi,
+            'turno_quel_giorno': turno_cand.to_dict() if turno_cand else None,
+            'compatibilita': (
+                'ottima' if score >= 60
+                else 'buona' if score >= 35
+                else 'discreta' if score >= 15
+                else 'bassa'
+            ),
+        })
+
+    risultati.sort(key=lambda x: x['score'], reverse=True)
+    return jsonify(risultati[:8])  # top 8
+
+
 @api.route('/api/scambi', methods=['GET'])
 def get_scambi():
     stato = request.args.get('stato')
