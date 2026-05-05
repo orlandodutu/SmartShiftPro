@@ -11,7 +11,7 @@ const ROLE_COLORS: Record<Ruolo, string> = {
 
 const ROLE_LABELS: Record<Ruolo, string> = {
   OSS:        "OSS",
-  INFERMIERA: "INF",
+  INFERMIERA: "INF/A",
   AUSILIARIO: "AUS",
   DEV:        "DEV",
   CAPOSALA:   "CAP",

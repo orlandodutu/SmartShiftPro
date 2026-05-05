@@ -754,7 +754,7 @@ export default function Dashboard() {
                 <SelectTrigger className="border-white/10 bg-white/5"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   {(["OSS", "INFERMIERA", "AUSILIARIO", "CAPOSALA"] as Ruolo[]).map((r) => (
-                    <SelectItem key={r} value={r}>{r}</SelectItem>
+                    <SelectItem key={r} value={r}>{r === "INFERMIERA" ? "Infermiere/a" : r}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
