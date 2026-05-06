@@ -119,6 +119,31 @@ export default function Dashboard() {
     } finally { setDeleteLoading(false); }
   };
 
+  /* Admin reset password */
+  const [resetPwTarget, setResetPwTarget] = useState<Dipendente | null>(null);
+  const [resetPwValue, setResetPwValue] = useState("password123");
+  const [resetPwLoading, setResetPwLoading] = useState(false);
+  const handleAdminResetPw = async () => {
+    if (!resetPwTarget) return;
+    setResetPwLoading(true);
+    try {
+      const res = await fetch(`/flask-api/api/dipendenti/${resetPwTarget.id}/reset_password`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ new_password: resetPwValue }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        toast({ title: `Password di ${resetPwTarget.nome} reimpostata a "${resetPwValue}"` });
+        setResetPwTarget(null);
+        setResetPwValue("password123");
+      } else {
+        toast({ title: data.errore || "Errore nel reset", variant: "destructive" });
+      }
+    } finally { setResetPwLoading(false); }
+  };
+
   /* Reset completo */
   const [resetOpen, setResetOpen] = useState(false);
   const [resetLoading, setResetLoading] = useState(false);
@@ -486,18 +511,31 @@ export default function Dashboard() {
                           </TableCell>
                           <TableCell className="text-right pr-2 font-mono text-sm text-gold font-bold">{dip.ore_totali}</TableCell>
                           {user?.is_admin && (
-                            <TableCell className="pr-3 w-8">
-                              {canDelete && (
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  className="h-6 w-6 text-red-400/30 hover:text-red-400 hover:bg-red-500/10"
-                                  onClick={(e) => { e.stopPropagation(); setDeleteTarget(dip); }}
-                                  data-testid={`dash-delete-${dip.id}`}
-                                >
-                                  <Trash2 className="h-3 w-3" />
-                                </Button>
-                              )}
+                            <TableCell className="pr-3 w-16">
+                              <div className="flex items-center gap-1 justify-end">
+                                {canDelete && (
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-6 w-6 text-amber-400/30 hover:text-amber-400 hover:bg-amber-500/10"
+                                    title={`Reset password ${dip.nome}`}
+                                    onClick={(e) => { e.stopPropagation(); setResetPwTarget(dip); setResetPwValue("password123"); }}
+                                  >
+                                    <KeyRound className="h-3 w-3" />
+                                  </Button>
+                                )}
+                                {canDelete && (
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-6 w-6 text-red-400/30 hover:text-red-400 hover:bg-red-500/10"
+                                    onClick={(e) => { e.stopPropagation(); setDeleteTarget(dip); }}
+                                    data-testid={`dash-delete-${dip.id}`}
+                                  >
+                                    <Trash2 className="h-3 w-3" />
+                                  </Button>
+                                )}
+                              </div>
                             </TableCell>
                           )}
                         </TableRow>
@@ -834,6 +872,53 @@ export default function Dashboard() {
               </button>
             </div>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Reset Password Utente (admin only) ── */}
+      <Dialog open={!!resetPwTarget} onOpenChange={(open) => { if (!open && !resetPwLoading) { setResetPwTarget(null); setResetPwValue("password123"); } }}>
+        <DialogContent className="glass-strong border-white/10 max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-foreground">
+              <KeyRound className="h-5 w-5 text-amber-400" />
+              Reset Password — {resetPwTarget?.nome}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="rounded-xl bg-amber-500/8 border border-amber-500/20 p-3 text-xs text-amber-300/80 space-y-1">
+              <p className="font-semibold">L'utente dovrà cambiarla al prossimo accesso</p>
+              <p>La password verrà reimpostata e il flag "cambiata" verrà azzerato.</p>
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs text-muted-foreground flex items-center gap-1.5">
+                <KeyRound className="h-3 w-3" />Nuova password temporanea
+              </Label>
+              <Input
+                value={resetPwValue}
+                onChange={(e) => setResetPwValue(e.target.value)}
+                placeholder="min. 6 caratteri"
+                className="border-white/10 bg-white/5 font-mono"
+                disabled={resetPwLoading}
+                autoFocus
+              />
+            </div>
+            <div className="flex gap-3">
+              <Button variant="outline" className="flex-1 border-white/10 hover:bg-white/5"
+                onClick={() => { setResetPwTarget(null); setResetPwValue("password123"); }}
+                disabled={resetPwLoading}>
+                Annulla
+              </Button>
+              <Button
+                className="flex-1 gap-2"
+                style={{ background: "linear-gradient(135deg, #f59e0b, #d97706)", color: "#0f172a" }}
+                onClick={handleAdminResetPw}
+                disabled={resetPwLoading || resetPwValue.length < 6}
+              >
+                <KeyRound className="h-4 w-4" />
+                {resetPwLoading ? "Reset..." : "Reimposta"}
+              </Button>
+            </div>
+          </div>
         </DialogContent>
       </Dialog>
 

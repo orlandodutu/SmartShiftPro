@@ -236,6 +236,28 @@ def change_password():
     return jsonify(user.to_dict(include_phone=True))
 
 
+@api.route('/api/dipendenti/<int:id>/reset_password', methods=['POST'])
+def admin_reset_password(id):
+    if 'user_id' not in session:
+        return jsonify({'errore': 'Non autenticato'}), 401
+    me = db.session.get(Dipendente, session['user_id'])
+    if not me or not me.is_admin:
+        return jsonify({'errore': 'Solo l\'amministratore può resettare le password'}), 403
+    target = db.session.get(Dipendente, id)
+    if not target:
+        return jsonify({'errore': 'Dipendente non trovato'}), 404
+    if target.id == me.id:
+        return jsonify({'errore': 'Usa "Cambia Password" per modificare la tua password'}), 400
+    data = request.json or {}
+    new_pw = str(data.get('new_password', '')).strip()
+    if len(new_pw) < 6:
+        return jsonify({'errore': 'La password deve essere di almeno 6 caratteri'}), 400
+    target.password = new_pw
+    target.password_changed = False
+    db.session.commit()
+    return jsonify({'success': True, 'nome': target.nome})
+
+
 @api.route('/api/logout', methods=['POST'])
 def logout():
     session.clear()
