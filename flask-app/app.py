@@ -22,6 +22,14 @@ app.config['SQLALCHEMY_DATABASE_URI'] = (
 )
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(days=30)
+# Riconnessione automatica se il server PostgreSQL chiude la connessione
+app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
+    'pool_pre_ping': True,       # testa la connessione prima di usarla
+    'pool_recycle': 300,         # ricicla le connessioni ogni 5 minuti
+    'pool_size': 5,
+    'max_overflow': 10,
+    'connect_args': {'connect_timeout': 10},
+}
 
 db = SQLAlchemy(app)
 
