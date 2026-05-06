@@ -21,6 +21,7 @@ app.config['SQLALCHEMY_DATABASE_URI'] = (
     _raw_db_url or f"sqlite:///{os.path.join(BASE_DIR, 'gestione_turni.db')}"
 )
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(days=30)
 
 db = SQLAlchemy(app)
 
@@ -201,6 +202,7 @@ def login():
         if master_pw and password == master_pw:
             user = Dipendente.query.filter_by(nome=username).first()
     if user:
+        session.permanent = True
         session['user_id'] = user.id
         now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         user.last_login = now
@@ -1570,39 +1572,46 @@ def legacy_genera_pdf():
     return genera_pdf()
 
 
+def startup_init():
+    """Eseguito all'avvio sia in dev (python app.py) che in produzione (gunicorn)."""
+    db.create_all()
+    from sqlalchemy import text, inspect as sa_inspect
+    is_pg = 'postgresql' in str(db.engine.url)
+    bool_default = 'false' if is_pg else '0'
+    try:
+        inspector = sa_inspect(db.engine)
+        cols = [c['name'] for c in inspector.get_columns('dipendente')]
+        with db.engine.connect() as conn:
+            for col, coldef in [
+                ('preferenze_turno', "VARCHAR(100) DEFAULT 'MATTINO,POMERIGGIO,NOTTE'"),
+                ('password_changed', f'BOOLEAN DEFAULT {bool_default}'),
+                ('last_login', "VARCHAR(20) DEFAULT ''"),
+                ('last_seen', "VARCHAR(20) DEFAULT ''"),
+                ('telefono', "VARCHAR(20) DEFAULT ''"),
+            ]:
+                if col not in cols:
+                    conn.execute(text(f"ALTER TABLE dipendente ADD COLUMN {col} {coldef}"))
+            turno_cols = [c['name'] for c in inspector.get_columns('turno')]
+            if 'manuale' not in turno_cols:
+                conn.execute(text(f"ALTER TABLE turno ADD COLUMN manuale BOOLEAN DEFAULT {bool_default}"))
+            if 'ora_inizio' not in turno_cols:
+                conn.execute(text("ALTER TABLE turno ADD COLUMN ora_inizio VARCHAR(5) DEFAULT ''"))
+            if 'archivio_mese' not in turno_cols:
+                conn.execute(text("ALTER TABLE turno ADD COLUMN archivio_mese VARCHAR(7) DEFAULT ''"))
+            conn.execute(text("UPDATE dipendente SET ruolo='AUSILIARIO' WHERE ruolo='PULIZIE'"))
+            conn.commit()
+    except Exception as e:
+        print(f"[startup] Migration warning: {e}")
+    db.create_all()
+    inizializza_staff()
+    print("[startup] Init completato.")
+
+
+# ── Eseguito sia da gunicorn che da python app.py ──
+with app.app_context():
+    startup_init()
+
+
 if __name__ == '__main__':
-    with app.app_context():
-        db.create_all()
-        # Migrations for new columns and data
-        from sqlalchemy import text, inspect as sa_inspect
-        try:
-            inspector = sa_inspect(db.engine)
-            cols = [c['name'] for c in inspector.get_columns('dipendente')]
-            with db.engine.connect() as conn:
-                for col, coldef in [
-                    ('preferenze_turno', "VARCHAR(100) DEFAULT 'MATTINO,POMERIGGIO,NOTTE'"),
-                    ('password_changed', 'BOOLEAN DEFAULT 0'),
-                    ('last_login', "VARCHAR(20) DEFAULT ''"),
-                    ('last_seen', "VARCHAR(20) DEFAULT ''"),
-                    ('telefono', "VARCHAR(20) DEFAULT ''"),
-                ]:
-                    if col not in cols:
-                        conn.execute(text(f"ALTER TABLE dipendente ADD COLUMN {col} {coldef}"))
-                # Migrate turno table
-                turno_cols = [c['name'] for c in inspector.get_columns('turno')]
-                if 'manuale' not in turno_cols:
-                    conn.execute(text("ALTER TABLE turno ADD COLUMN manuale BOOLEAN DEFAULT 0"))
-                if 'ora_inizio' not in turno_cols:
-                    conn.execute(text("ALTER TABLE turno ADD COLUMN ora_inizio VARCHAR(5) DEFAULT ''"))
-                if 'archivio_mese' not in turno_cols:
-                    conn.execute(text("ALTER TABLE turno ADD COLUMN archivio_mese VARCHAR(7) DEFAULT ''"))
-                # Rename PULIZIE → AUSILIARIO
-                conn.execute(text("UPDATE dipendente SET ruolo='AUSILIARIO' WHERE ruolo='PULIZIE'"))
-                conn.commit()
-        except Exception:
-            pass
-        # Ensure assenza table exists
-        db.create_all()
-        inizializza_staff()
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port, debug=False)
