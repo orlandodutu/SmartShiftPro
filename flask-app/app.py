@@ -671,8 +671,9 @@ def _genera_interno(data_inizio_str, giorni):
         assenti_ids = {a.dipendente_id for a in assenze_oggi}
 
         # Night-chain tracking from yesterday
-        notte_ieri  = {t.dipendente_id for t in Turno.query.filter_by(data=ieri_str, tipo='NOTTE').all()}
-        smonto_ieri = {t.dipendente_id for t in Turno.query.filter_by(data=ieri_str, tipo='SMONTO').all()}
+        notte_ieri   = {t.dipendente_id for t in Turno.query.filter_by(data=ieri_str, tipo='NOTTE').all()}
+        smonto_ieri  = {t.dipendente_id for t in Turno.query.filter_by(data=ieri_str, tipo='SMONTO').all()}
+        riposo_ieri  = {t.dipendente_id for t in Turno.query.filter_by(data=ieri_str, tipo='RIPOSO').all()}
 
         def crea(dip, tipo, ore_override=None, ora_inizio=''):
             nonlocal generati, saltati
@@ -812,12 +813,22 @@ def _genera_interno(data_inizio_str, giorni):
         oss_must_rest_normali = [d for d in oss_must_rest if d.id not in smonto_ieri]
 
         for dip in oss_must_rest_smonto:
+            # Post-SMONTO RIPOSO è obbligatorio (catena NOTTE→SMONTO→RIPOSO).
+            # Il giorno prima era SMONTO (non RIPOSO), quindi non ci può essere un doppio riposo.
             crea(dip, 'RIPOSO')
             oss_riposi_week[(dip.id, cal_week)] = True
 
         for dip in oss_must_rest_normali:
-            crea(dip, 'RIPOSO')
-            oss_riposi_week[(dip.id, cal_week)] = True
+            if dip.id in riposo_ieri:
+                # Ieri era già RIPOSO: evita due riposi consecutivi → lavora oggi.
+                if m_c < 3:
+                    crea(dip, 'MATTINO');    m_c += 1
+                else:
+                    crea(dip, 'POMERIGGIO'); p_c += 1
+                # Non segniamo come riposato: prenderà il riposo un altro giorno questa settimana.
+            else:
+                crea(dip, 'RIPOSO')
+                oss_riposi_week[(dip.id, cal_week)] = True
 
         # ── 4b. NOTTE assignment — after regular OSS shifts to allow double shifts ──
         #
@@ -980,8 +991,14 @@ def _genera_interno(data_inizio_str, giorni):
             crea(dip, 'MATTINO', AUSILIARIO_ORE, ora_inizio=ora)
 
         for dip in aus_must_rest:
-            crea(dip, 'RIPOSO')
-            aus_riposi_6d[(dip.id, aus_block)] = True
+            if dip.id in riposo_ieri:
+                # Ieri era già RIPOSO: evita due riposi consecutivi → lavora oggi.
+                ora = AUSILIARIO_ORARI.get(dip.nome, '07:00')
+                crea(dip, 'MATTINO', AUSILIARIO_ORE, ora_inizio=ora)
+                # Non segniamo come riposata: riposerà nel prossimo blocco da 6 giorni.
+            else:
+                crea(dip, 'RIPOSO')
+                aus_riposi_6d[(dip.id, aus_block)] = True
 
         db.session.commit()
 
