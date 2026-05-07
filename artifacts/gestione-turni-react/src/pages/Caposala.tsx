@@ -296,7 +296,7 @@ export default function Caposala() {
             </div>
             <div>
               <p className="text-xs font-bold text-foreground leading-tight">
-                {scambiCount === 0 ? "Nessuno" : scambiCount} scamb{scambiCount === 1 ? "io" : "i"}
+                {scambiCount === 0 ? "Nessun scambio" : `${scambiCount} scamb${scambiCount === 1 ? "io" : "i"}`}
               </p>
               <p className="text-[10px] text-muted-foreground leading-tight">in attesa</p>
             </div>
