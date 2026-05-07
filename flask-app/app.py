@@ -884,6 +884,63 @@ def _genera_interno(data_inizio_str, giorni):
                     _add_notte_direct(candidate, 'MATTINO')
                     break
 
+        # ── 4c. MATTINO+POMERIGGIO doubles for non-night OSS ──
+        # OSS who cannot do NOTTE (no NOTTE in preferenze) often cover both daytime
+        # slots in real-world practice. We mirror this: if POMERIGGIO coverage is still
+        # short after regular assignment, let non-night OSS already on MATTINO take
+        # POMERIGGIO too. Sorted by fewest hours first for equalization.
+        if p_c < 2:
+            mat_ids_oggi = {
+                t.dipendente_id
+                for t in Turno.query.filter_by(data=data_str, tipo='MATTINO').all()
+            }
+            candidati_dop = sorted(
+                [d for d in all_oss
+                 if not is_notte_eligible(d)
+                 and d.id in mat_ids_oggi
+                 and d.id not in assenti_ids],
+                key=lambda d: ore_corrente.get(d.id, 0)
+            )
+            for dip in candidati_dop:
+                if p_c >= 2:
+                    break
+                ore_p = ORE_MAP['POMERIGGIO']
+                db.session.add(Turno(
+                    dipendente_id=dip.id, data=data_str, tipo='POMERIGGIO',
+                    ore=ore_p, note='Auto (MAT+POM)', manuale=False, ora_inizio='14:00'
+                ))
+                dip.ore_totali += ore_p
+                ore_corrente[dip.id] = ore_corrente.get(dip.id, 0) + ore_p
+                generati += 1
+                p_c += 1
+
+        # Symmetrical: if MATTINO coverage is still short, non-night OSS on POMERIGGIO
+        # can also take a MATTINO slot (rarer but possible).
+        if m_c < 3:
+            pom_ids_oggi = {
+                t.dipendente_id
+                for t in Turno.query.filter_by(data=data_str, tipo='POMERIGGIO').all()
+            }
+            candidati_mat = sorted(
+                [d for d in all_oss
+                 if not is_notte_eligible(d)
+                 and d.id in pom_ids_oggi
+                 and d.id not in assenti_ids],
+                key=lambda d: ore_corrente.get(d.id, 0)
+            )
+            for dip in candidati_mat:
+                if m_c >= 3:
+                    break
+                ore_m = ORE_MAP['MATTINO']
+                db.session.add(Turno(
+                    dipendente_id=dip.id, data=data_str, tipo='MATTINO',
+                    ore=ore_m, note='Auto (POM+MAT)', manuale=False, ora_inizio='07:00'
+                ))
+                dip.ore_totali += ore_m
+                ore_corrente[dip.id] = ore_corrente.get(dip.id, 0) + ore_m
+                generati += 1
+                m_c += 1
+
         # ── 5. Ausiliari: 07–15, exactly 1 RIPOSO every 6 days (block-based) ──
         # aus_block computed above when loading DB records.
         # Each AUS rests on the day within the 6-day block matching their rank-offset.
