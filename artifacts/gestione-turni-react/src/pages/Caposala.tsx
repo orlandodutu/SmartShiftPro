@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Dipendente } from "@/lib/api";
+import { Dipendente, RichiestaScambio } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -9,10 +9,12 @@ import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { RoleBadge } from "@/components/ui/RoleBadge";
+import { ShiftBadge } from "@/components/ui/ShiftBadge";
+import { Badge } from "@/components/ui/badge";
 import {
   Check, CalendarRange, Calendar, ShieldAlert,
   UserPlus, Pencil, KeyRound, Phone, Users, Copy, Trash2,
-  Sun, Sunset, BedDouble, ArrowLeftRight,
+  Sun, Sunset, BedDouble, ArrowLeftRight, X, Clock,
 } from "lucide-react";
 
 type Pref = "MATTINO" | "POMERIGGIO" | "NOTTE";
@@ -37,6 +39,9 @@ export default function Caposala() {
 
   const [genLoading, setGenLoading] = useState<"settimana" | "mese" | null>(null);
   const [scambiCount, setScambiCount] = useState(0);
+  const [scambiPendenti, setScambiPendenti] = useState<RichiestaScambio[]>([]);
+  const [gestioneLoading, setGestioneLoading] = useState<number | null>(null);
+  const [notaScambio, setNotaScambio] = useState<{ id: number; nota: string } | null>(null);
 
   // Staff management state
   const [dipendenti, setDipendenti] = useState<Dipendente[]>([]);
@@ -63,10 +68,43 @@ export default function Caposala() {
       .then((d) => setScambiCount(d.count ?? 0))
       .catch(() => {});
 
+  const fetchScambiPendenti = () =>
+    fetch("/flask-api/api/scambi?stato=IN_ATTESA", { credentials: "include" })
+      .then((r) => r.ok ? r.json() : [])
+      .then((d: RichiestaScambio[]) => setScambiPendenti(d))
+      .catch(() => {});
+
+  const handleGestisci = async (id: number, azione: "approva" | "rifiuta", nota?: string) => {
+    setGestioneLoading(id);
+    try {
+      const res = await fetch(`/flask-api/api/scambi/${id}/gestisci`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ azione, nota_caposala: nota || "" }),
+      });
+      if (res.ok) {
+        toast({
+          title: azione === "approva" ? "Scambio approvato ✓" : "Scambio rifiutato",
+          description: azione === "approva" ? "I turni sono stati scambiati." : "La richiesta è stata rifiutata.",
+        });
+        setNotaScambio(null);
+        fetchScambiPendenti();
+        fetchScambiCount();
+      } else {
+        const err = await res.json();
+        toast({ title: err.errore || "Errore", variant: "destructive" });
+      }
+    } finally {
+      setGestioneLoading(null);
+    }
+  };
+
   useEffect(() => {
     fetchDipendenti();
     fetchScambiCount();
-    const interval = setInterval(fetchScambiCount, 30_000);
+    fetchScambiPendenti();
+    const interval = setInterval(() => { fetchScambiCount(); fetchScambiPendenti(); }, 15_000);
     return () => clearInterval(interval);
   }, []);
 
@@ -267,6 +305,89 @@ export default function Caposala() {
       </div>
 
       <div className="p-6 md:p-10 max-w-5xl mx-auto space-y-10">
+
+        {/* ─── Richieste Scambio Pendenti ─── */}
+        {scambiPendenti.length > 0 && (
+          <section>
+            <div className="flex items-center gap-2 mb-4">
+              <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-widest">Richieste di Scambio in Attesa</h2>
+              <span className="text-sm font-bold text-slate-900 bg-amber-400 px-2.5 py-0.5 rounded-full animate-pulse">
+                {scambiPendenti.length}
+              </span>
+            </div>
+            <div className="space-y-3">
+              {scambiPendenti.map((s) => (
+                <div
+                  key={s.id}
+                  className="rounded-2xl border border-amber-500/20 bg-amber-500/5 p-4 space-y-3"
+                >
+                  <div className="flex items-start justify-between gap-3 flex-wrap">
+                    <div className="space-y-1.5">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-bold text-foreground">{s.richiedente_nome}</span>
+                        <ArrowLeftRight className="h-3.5 w-3.5 text-amber-400" />
+                        <span className="font-bold text-foreground">{s.destinatario_nome}</span>
+                        {s.destinatario_ruolo && <RoleBadge role={s.destinatario_ruolo} />}
+                      </div>
+                      <div className="flex items-center gap-3 text-sm text-muted-foreground flex-wrap">
+                        {s.turno_richiedente && (
+                          <span className="flex items-center gap-1.5">
+                            <span className="text-xs text-muted-foreground/60">Cede:</span>
+                            <ShiftBadge type={s.turno_richiedente.tipo} />
+                            <span className="font-mono text-xs">{s.turno_richiedente.data}</span>
+                          </span>
+                        )}
+                        {s.turno_destinatario && (
+                          <span className="flex items-center gap-1.5">
+                            <ArrowLeftRight className="h-3 w-3 text-muted-foreground/40" />
+                            <ShiftBadge type={s.turno_destinatario.tipo} />
+                            <span className="font-mono text-xs">{s.turno_destinatario.data}</span>
+                          </span>
+                        )}
+                      </div>
+                      {s.nota && (
+                        <p className="text-xs text-muted-foreground italic">"{s.nota}"</p>
+                      )}
+                      <div className="flex items-center gap-1 text-[10px] text-muted-foreground/50">
+                        <Clock className="h-3 w-3" />
+                        {new Date(s.creata_il).toLocaleDateString("it-IT")}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <button
+                        onClick={() => setNotaScambio({ id: s.id, nota: "" })}
+                        disabled={gestioneLoading === s.id}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border border-red-500/30 text-red-400 bg-red-500/8 hover:bg-red-500/15 transition-colors disabled:opacity-50"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                        Rifiuta
+                      </button>
+                      <button
+                        onClick={() => handleGestisci(s.id, "approva")}
+                        disabled={gestioneLoading === s.id}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold glow-gold"
+                        style={{ background: CRYSTAL, color: "#0f172a" }}
+                      >
+                        <Check className="h-3.5 w-3.5" />
+                        {gestioneLoading === s.id ? "..." : "Approva"}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
+
+        {scambiPendenti.length === 0 && (
+          <section>
+            <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-widest mb-3">Richieste di Scambio</h2>
+            <div className="rounded-2xl border border-white/8 bg-white/3 p-6 text-center">
+              <ArrowLeftRight className="h-6 w-6 text-muted-foreground/20 mx-auto mb-2" />
+              <p className="text-sm text-muted-foreground">Nessuna richiesta in attesa</p>
+            </div>
+          </section>
+        )}
 
         {/* ─── Auto-generate ─── */}
         <section>
@@ -582,6 +703,44 @@ export default function Caposala() {
                 >
                   <Trash2 className="h-4 w-4" />
                   {deleteLoading ? "Eliminazione..." : "Elimina"}
+                </Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* ─── Rifiuta scambio dialog ─── */}
+      <Dialog open={!!notaScambio} onOpenChange={(open) => !open && setNotaScambio(null)}>
+        <DialogContent className="glass-strong border-white/10 max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-red-400">
+              <X className="h-5 w-5" />
+              Rifiuta Richiesta
+            </DialogTitle>
+          </DialogHeader>
+          {notaScambio && (
+            <div className="space-y-4">
+              <p className="text-sm text-muted-foreground">Aggiungi una nota opzionale per il richiedente.</p>
+              <Textarea
+                value={notaScambio.nota}
+                onChange={(e) => setNotaScambio({ ...notaScambio, nota: e.target.value })}
+                placeholder="Motivo del rifiuto (opzionale)..."
+                className="border-white/10 bg-white/5 resize-none"
+                rows={3}
+              />
+              <div className="flex gap-3">
+                <Button variant="outline" className="flex-1 border-white/10 hover:bg-white/5"
+                  onClick={() => setNotaScambio(null)}>
+                  Annulla
+                </Button>
+                <Button
+                  className="flex-1 bg-red-600 hover:bg-red-500 text-white gap-2"
+                  onClick={() => handleGestisci(notaScambio.id, "rifiuta", notaScambio.nota)}
+                  disabled={gestioneLoading === notaScambio.id}
+                >
+                  <X className="h-4 w-4" />
+                  {gestioneLoading === notaScambio.id ? "..." : "Rifiuta"}
                 </Button>
               </div>
             </div>

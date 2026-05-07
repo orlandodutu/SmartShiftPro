@@ -769,40 +769,28 @@ def _genera_interno(data_inizio_str, giorni):
             else:
                 crea(dip, 'MATTINO');    m_c += 1
 
-        # Pull from must_rest if minimum coverage still not met
+        # Pull from must_rest SOLO se la copertura è sotto il minimo critico
         for dip in list(oss_must_rest):
-            if m_c < 3:
+            if m_c < 2:
                 oss_must_rest.remove(dip)
                 crea(dip, 'MATTINO');    m_c += 1
-            elif p_c < 3:
+            elif m_c >= 2 and p_c < 1:
                 oss_must_rest.remove(dip)
                 crea(dip, 'POMERIGGIO'); p_c += 1
             else:
                 break
 
-        # Assign RIPOSO — max 2 OSS a riposo per giorno
-        # Post-SMONTO hanno priorità assoluta (non possono lavorare)
-        MAX_RIPOSO_GIORNO = 2
+        # Assign RIPOSO — nessun limite giornaliero: garantisce 1 riposo/settimana a rotazione
         oss_must_rest_smonto = [d for d in oss_must_rest if d.id in smonto_ieri]
         oss_must_rest_normali = [d for d in oss_must_rest if d.id not in smonto_ieri]
 
-        riposi_assegnati = 0
         for dip in oss_must_rest_smonto:
             crea(dip, 'RIPOSO')
             oss_riposi_week[(dip.id, cal_week)] = True
-            riposi_assegnati += 1
 
         for dip in oss_must_rest_normali:
-            if riposi_assegnati < MAX_RIPOSO_GIORNO:
-                crea(dip, 'RIPOSO')
-                oss_riposi_week[(dip.id, cal_week)] = True
-                riposi_assegnati += 1
-            else:
-                # Troppi a riposo oggi: sposta al mattino o pomeriggio
-                if p_c < 3:
-                    crea(dip, 'POMERIGGIO'); p_c += 1
-                else:
-                    crea(dip, 'MATTINO');    m_c += 1
+            crea(dip, 'RIPOSO')
+            oss_riposi_week[(dip.id, cal_week)] = True
 
         # ── 4b. NOTTE assignment — after regular OSS shifts to allow double shifts ──
         #
@@ -1302,6 +1290,39 @@ def approva_scambio(id):
     return jsonify(richiesta.to_dict())
 
 
+@api.route('/api/scambi/<int:id>/gestisci', methods=['PUT'])
+def gestisci_scambio(id):
+    if 'user_id' not in session:
+        return jsonify({'errore': 'Non autenticato'}), 401
+    richiedente = db.session.get(Dipendente, session['user_id'])
+    if not richiedente or not (richiedente.is_admin or richiedente.ruolo == 'CAPOSALA'):
+        return jsonify({'errore': 'Non autorizzato'}), 403
+    richiesta = RichiestaScambio.query.get_or_404(id)
+    data = request.json or {}
+    azione = data.get('azione', '')
+    nota_caposala = data.get('nota_caposala', '')
+    if richiesta.stato != 'IN_ATTESA':
+        return jsonify({'errore': 'Richiesta già gestita'}), 400
+    if azione == 'approva':
+        richiesta.stato = 'APPROVATA'
+        richiesta.nota_caposala = nota_caposala
+        turno_r = richiesta.turno_richiedente
+        turno_d = richiesta.turno_destinatario
+        if turno_r and turno_d:
+            tipo_temp, ore_temp = turno_r.tipo, turno_r.ore
+            turno_r.tipo, turno_r.ore = turno_d.tipo, turno_d.ore
+            turno_d.tipo, turno_d.ore = tipo_temp, ore_temp
+            _ricalcola_statistiche(richiesta.richiedente_id)
+            _ricalcola_statistiche(richiesta.destinatario_id)
+    elif azione == 'rifiuta':
+        richiesta.stato = 'RIFIUTATA'
+        richiesta.nota_caposala = nota_caposala
+    else:
+        return jsonify({'errore': 'Azione non valida (approva/rifiuta)'}), 400
+    db.session.commit()
+    return jsonify(richiesta.to_dict())
+
+
 @api.route('/api/scambi/<int:id>', methods=['DELETE'])
 def annulla_scambio(id):
     richiesta = RichiestaScambio.query.get_or_404(id)
@@ -1433,83 +1454,292 @@ def manifest():
 
 @api.route('/api/genera_report_mensile', methods=['GET'])
 def genera_pdf():
-    mese = request.args.get('mese', str(datetime.now().month))
-    anno = request.args.get('anno', str(datetime.now().year))
-    nome_mesi = ['', 'Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno',
-                 'Luglio', 'Agosto', 'Settembre', 'Ottobre', 'Novembre', 'Dicembre']
-    prefix = f"{anno}-{mese.zfill(2)}"
+    import calendar as _cal
+    from reportlab.lib.pagesizes import landscape
+    from reportlab.lib.styles import ParagraphStyle
+    from reportlab.lib.units import mm
 
-    # Permission check: admin and Caposala get the full report, others get only their own
+    mese = int(request.args.get('mese', datetime.now().month))
+    anno = int(request.args.get('anno', datetime.now().year))
+
     user_id = session.get('user_id')
     me = db.session.get(Dipendente, user_id) if user_id else None
-    is_privileged = me and (me.is_admin or me.ruolo == 'CAPOSALA')
     if not me:
         return jsonify({'errore': 'Non autenticato'}), 401
+    is_privileged = me.is_admin or me.ruolo == 'CAPOSALA'
 
-    turni_query = Turno.query.filter(Turno.data.like(f"{prefix}%")).order_by(Turno.data)
-    if not is_privileged:
-        turni_query = turni_query.filter(Turno.dipendente_id == user_id)
-    turni = turni_query.all()
+    nome_mesi = ['', 'Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno',
+                 'Luglio', 'Agosto', 'Settembre', 'Ottobre', 'Novembre', 'Dicembre']
+    giorni_del_mese = _cal.monthrange(anno, mese)[1]
+    prefix = f"{anno}-{str(mese).zfill(2)}"
 
-    report_title = (
-        f"Report Turni - {nome_mesi[int(mese)]} {anno}"
-        if is_privileged
-        else f"Report Personale - {me.nome} - {nome_mesi[int(mese)]} {anno}"
-    )
+    # Colours
+    C_NAVY    = colors.HexColor('#0f172a')
+    C_NAVY2   = colors.HexColor('#1e3a5f')
+    C_GOLD    = colors.HexColor('#FFBF00')
+    C_WHITE   = colors.white
+    C_GRAY1   = colors.HexColor('#f8fafc')
+    C_GRAY2   = colors.HexColor('#e2e8f0')
+    C_BORDER  = colors.HexColor('#cbd5e1')
 
-    buffer = io.BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=A4, topMargin=30, bottomMargin=30)
-    styles = getSampleStyleSheet()
-    elements = [
-        Paragraph(report_title, styles['Title']),
-        Spacer(1, 20)
-    ]
-    if turni:
-        data_table = [['Data', 'Dipendente', 'Ruolo', 'Turno', 'Ore', 'Note']]
-        for t in turni:
-            data_table.append([t.data, t.dipendente.nome, t.dipendente.ruolo, t.tipo, str(t.ore), t.note or ''])
-        table = Table(data_table, colWidths=[70, 100, 80, 80, 40, 100])
-        table.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1a3a6b')),
-            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, -1), 9),
-            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f0f4ff')]),
-            ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
-            ('TOPPADDING', (0, 0), (-1, -1), 6),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
-        ]))
-        elements.append(table)
-    else:
-        elements.append(Paragraph("Nessun turno registrato per questo mese.", styles['Normal']))
+    SHIFT_COLOR = {
+        'MATTINO':    colors.HexColor('#FFF8E1'),
+        'POMERIGGIO': colors.HexColor('#FFF3E0'),
+        'NOTTE':      colors.HexColor('#EEF0FF'),
+        'SMONTO':     colors.HexColor('#F5F0FF'),
+        'FERIE':      colors.HexColor('#E8F5E9'),
+        'MALATTIA':   colors.HexColor('#FFEBEE'),
+        'RIPOSO':     colors.HexColor('#F1F5F9'),
+    }
+    SHIFT_TEXT = {
+        'MATTINO':    colors.HexColor('#92400E'),
+        'POMERIGGIO': colors.HexColor('#9A3412'),
+        'NOTTE':      colors.HexColor('#3730A3'),
+        'SMONTO':     colors.HexColor('#6D28D9'),
+        'FERIE':      colors.HexColor('#065F46'),
+        'MALATTIA':   colors.HexColor('#991B1B'),
+        'RIPOSO':     colors.HexColor('#64748B'),
+    }
+    SHIFT_ABB = {
+        'MATTINO': 'MAT', 'POMERIGGIO': 'POM', 'NOTTE': 'NOT',
+        'SMONTO': 'SMO', 'FERIE': 'FER', 'MALATTIA': 'MAL', 'RIPOSO': 'RIP',
+    }
 
-    elements.append(Spacer(1, 30))
-    elements.append(Paragraph("Riepilogo", styles['Heading2']))
-    elements.append(Spacer(1, 10))
+    # Turni del mese
+    turni_mese = Turno.query.filter(Turno.data.like(f"{prefix}%")).all()
+    turni_map = {}
+    for t in turni_mese:
+        day = int(t.data.split('-')[2])
+        turni_map[(t.dipendente_id, day)] = t.tipo
+
+    # Stats per persona (dal mese corrente)
+    stats = {}
+    for t in turni_mese:
+        d_id = t.dipendente_id
+        if d_id not in stats:
+            stats[d_id] = {'ore': 0, 'mat': 0, 'pom': 0, 'not': 0, 'smo': 0,
+                           'fer': 0, 'mal': 0, 'rip': 0, 'lav': 0}
+        s = stats[d_id]
+        s['ore'] += t.ore
+        tipo = t.tipo
+        if tipo == 'MATTINO':    s['mat'] += 1; s['lav'] += 1
+        elif tipo == 'POMERIGGIO': s['pom'] += 1; s['lav'] += 1
+        elif tipo == 'NOTTE':    s['not'] += 1; s['lav'] += 1
+        elif tipo == 'SMONTO':   s['smo'] += 1
+        elif tipo == 'FERIE':    s['fer'] += 1
+        elif tipo == 'MALATTIA': s['mal'] += 1
+        elif tipo == 'RIPOSO':   s['rip'] += 1
+
     if is_privileged:
-        dip_list = Dipendente.query.order_by(Dipendente.ruolo).all()
+        dip_list = Dipendente.query.order_by(Dipendente.ruolo, Dipendente.nome).all()
+        dip_list = [d for d in dip_list if not d.is_admin or d.ruolo != 'CAPOSALA']
     else:
         dip_list = [me]
-    riepilogo = [['Dipendente', 'Ruolo', 'Ore', 'Notti', 'Ferie', 'Malattia']]
-    for d in dip_list:
-        riepilogo.append([d.nome, d.ruolo, str(d.ore_totali), str(d.notti_fatte), str(d.ferie), str(d.malattia)])
-    rt = Table(riepilogo, colWidths=[100, 80, 70, 60, 60, 70])
-    rt.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1a3a6b')),
-        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f0f4ff')]),
-        ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
-        ('FONTSIZE', (0, 0), (-1, -1), 9),
-        ('TOPPADDING', (0, 0), (-1, -1), 6),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+
+    buffer = io.BytesIO()
+    PAGE = landscape(A4)
+    doc = SimpleDocTemplate(
+        buffer, pagesize=PAGE,
+        topMargin=15*mm, bottomMargin=15*mm,
+        leftMargin=10*mm, rightMargin=10*mm
+    )
+    styles = getSampleStyleSheet()
+
+    title_style = ParagraphStyle('title', fontName='Helvetica-Bold', fontSize=16,
+                                  textColor=C_WHITE, spaceAfter=2)
+    sub_style   = ParagraphStyle('sub',   fontName='Helvetica',      fontSize=9,
+                                  textColor=C_GOLD,  spaceAfter=0)
+    sec_style   = ParagraphStyle('sec',   fontName='Helvetica-Bold', fontSize=10,
+                                  textColor=C_NAVY,  spaceBefore=8, spaceAfter=4)
+
+    elements = []
+
+    # ── HEADER BANNER ──────────────────────────────────────────────────────────
+    page_w = PAGE[0] - 20*mm
+    header_data = [[
+        Paragraph(f"SmartShift Pro — Calendario Turni", title_style),
+        Paragraph(
+            f"{nome_mesi[mese]} {anno}  |  Generato il {datetime.now().strftime('%d/%m/%Y %H:%M')}",
+            sub_style
+        ),
+    ]]
+    header_tbl = Table(header_data, colWidths=[page_w * 0.55, page_w * 0.45])
+    header_tbl.setStyle(TableStyle([
+        ('BACKGROUND',   (0, 0), (-1, -1), C_NAVY),
+        ('TOPPADDING',   (0, 0), (-1, -1), 10),
+        ('BOTTOMPADDING',(0, 0), (-1, -1), 10),
+        ('LEFTPADDING',  (0, 0), (-1, -1), 12),
+        ('RIGHTPADDING', (0, 0), (-1, -1), 12),
+        ('VALIGN',       (0, 0), (-1, -1), 'MIDDLE'),
+        ('ALIGN',        (1, 0), (1, 0),   'RIGHT'),
+        ('ROUNDEDCORNERS', [4, 4, 4, 4]),
     ]))
-    elements.append(rt)
+    elements.append(header_tbl)
+    elements.append(Spacer(1, 6*mm))
+
+    # ── LEGENDA TURNI ──────────────────────────────────────────────────────────
+    leg_data = [['LEGENDA:']]
+    leg_items = []
+    for tipo, abb in SHIFT_ABB.items():
+        cell = Paragraph(f'<b>{abb}</b>', ParagraphStyle('l', fontName='Helvetica-Bold',
+                         fontSize=7, textColor=SHIFT_TEXT[tipo]))
+        leg_items.append(cell)
+    leg_data = [leg_items]
+    col_w = page_w / len(SHIFT_ABB)
+    leg_tbl = Table(leg_data, colWidths=[col_w] * len(SHIFT_ABB), rowHeights=[14])
+    leg_style = [
+        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('GRID', (0, 0), (-1, -1), 0.3, C_BORDER),
+        ('TOPPADDING', (0, 0), (-1, -1), 2),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 2),
+    ]
+    for idx, tipo in enumerate(SHIFT_ABB.keys()):
+        leg_style.append(('BACKGROUND', (idx, 0), (idx, 0), SHIFT_COLOR[tipo]))
+    leg_tbl.setStyle(TableStyle(leg_style))
+    elements.append(leg_tbl)
+    elements.append(Spacer(1, 4*mm))
+
+    # ── CALENDARIO GRID ────────────────────────────────────────────────────────
+    # Giorni della settimana abbreviati
+    GIORNI_SETT = ['Lu','Ma','Me','Gi','Ve','Sa','Do']
+    giorno_sett_map = {}
+    for d in range(1, giorni_del_mese + 1):
+        wd = _cal.weekday(anno, mese, d)
+        giorno_sett_map[d] = GIORNI_SETT[wd]
+
+    name_col_w  = 70
+    role_col_w  = 45
+    day_col_w   = (page_w - name_col_w - role_col_w) / giorni_del_mese
+
+    # Header row: nomi giorno
+    header_row1 = [
+        Paragraph('<b>Dipendente</b>', ParagraphStyle('h', fontName='Helvetica-Bold', fontSize=7, textColor=C_WHITE)),
+        Paragraph('<b>Ruolo</b>',      ParagraphStyle('h', fontName='Helvetica-Bold', fontSize=7, textColor=C_WHITE)),
+    ]
+    for d in range(1, giorni_del_mese + 1):
+        wd_label = giorno_sett_map[d]
+        is_we = wd_label in ('Sa', 'Do')
+        col_txt = f'<b>{d}</b>\n{wd_label}'
+        p = Paragraph(col_txt, ParagraphStyle('dh', fontName='Helvetica-Bold', fontSize=6,
+                                               textColor=colors.HexColor('#F59E0B') if is_we else C_WHITE,
+                                               alignment=1, leading=8))
+        header_row1.append(p)
+
+    grid_data  = [header_row1]
+    grid_style = [
+        ('BACKGROUND',    (0, 0), (-1, 0), C_NAVY2),
+        ('ALIGN',         (0, 0), (-1, -1), 'CENTER'),
+        ('VALIGN',        (0, 0), (-1, -1), 'MIDDLE'),
+        ('FONTSIZE',      (0, 0), (-1, -1), 6),
+        ('GRID',          (0, 0), (-1, -1), 0.3, C_BORDER),
+        ('TOPPADDING',    (0, 0), (-1, -1), 2),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 2),
+        ('LEFTPADDING',   (0, 0), (-1, -1), 1),
+        ('RIGHTPADDING',  (0, 0), (-1, -1), 1),
+    ]
+
+    RUOLO_ORD = {'OSS': 0, 'INFERMIERA': 1, 'AUSILIARIO': 2, 'CAPOSALA': 3, 'DEV': 4}
+    dip_list_sorted = sorted(dip_list, key=lambda d: (RUOLO_ORD.get(d.ruolo, 9), d.nome))
+
+    row_colors_bg = [C_GRAY1, C_WHITE]
+    for row_idx, dip in enumerate(dip_list_sorted):
+        row_bg = row_colors_bg[row_idx % 2]
+        name_p = Paragraph(f'<b>{dip.nome}</b>', ParagraphStyle('n', fontName='Helvetica-Bold',
+                            fontSize=7, textColor=C_NAVY))
+        role_p = Paragraph(dip.ruolo[:3], ParagraphStyle('r', fontName='Helvetica',
+                            fontSize=6, textColor=colors.HexColor('#475569'), alignment=1))
+        row = [name_p, role_p]
+        for d in range(1, giorni_del_mese + 1):
+            tipo = turni_map.get((dip.id, d), '')
+            abb  = SHIFT_ABB.get(tipo, '')
+            p    = Paragraph(abb, ParagraphStyle('c', fontName='Helvetica-Bold', fontSize=6,
+                                                  textColor=SHIFT_TEXT.get(tipo, C_NAVY) if tipo else C_NAVY,
+                                                  alignment=1))
+            row.append(p)
+        grid_data.append(row)
+        ri = row_idx + 1
+        grid_style.append(('BACKGROUND', (0, ri), (-1, ri), row_bg))
+        for d_idx, d in enumerate(range(1, giorni_del_mese + 1)):
+            tipo = turni_map.get((dip.id, d), '')
+            if tipo:
+                col_i = 2 + d_idx
+                grid_style.append(('BACKGROUND', (col_i, ri), (col_i, ri), SHIFT_COLOR[tipo]))
+            # Weekend light tint columns
+            wd_label = giorno_sett_map[d]
+            if wd_label in ('Sa', 'Do') and not tipo:
+                col_i = 2 + d_idx
+                grid_style.append(('BACKGROUND', (col_i, ri), (col_i, ri), colors.HexColor('#F8F3E0')))
+
+    col_widths = [name_col_w, role_col_w] + [day_col_w] * giorni_del_mese
+    grid_tbl = Table(grid_data, colWidths=col_widths, rowHeights=14)
+    grid_tbl.setStyle(TableStyle(grid_style))
+    elements.append(grid_tbl)
+    elements.append(Spacer(1, 6*mm))
+
+    # ── RIEPILOGO STATISTICHE ──────────────────────────────────────────────────
+    elements.append(Paragraph("Riepilogo mensile", sec_style))
+
+    sum_header = [
+        Paragraph('<b>Dipendente</b>',  ParagraphStyle('sh', fontName='Helvetica-Bold', fontSize=8, textColor=C_WHITE)),
+        Paragraph('<b>Ruolo</b>',        ParagraphStyle('sh', fontName='Helvetica-Bold', fontSize=8, textColor=C_WHITE)),
+        Paragraph('<b>Giorni lav.</b>',  ParagraphStyle('sh', fontName='Helvetica-Bold', fontSize=8, textColor=C_WHITE, alignment=1)),
+        Paragraph('<b>Ore tot.</b>',     ParagraphStyle('sh', fontName='Helvetica-Bold', fontSize=8, textColor=C_WHITE, alignment=1)),
+        Paragraph('<b>Mattino</b>',      ParagraphStyle('sh', fontName='Helvetica-Bold', fontSize=8, textColor=C_WHITE, alignment=1)),
+        Paragraph('<b>Pomeriggio</b>',   ParagraphStyle('sh', fontName='Helvetica-Bold', fontSize=8, textColor=C_WHITE, alignment=1)),
+        Paragraph('<b>Notte</b>',        ParagraphStyle('sh', fontName='Helvetica-Bold', fontSize=8, textColor=C_WHITE, alignment=1)),
+        Paragraph('<b>Smonto</b>',       ParagraphStyle('sh', fontName='Helvetica-Bold', fontSize=8, textColor=C_WHITE, alignment=1)),
+        Paragraph('<b>Ferie</b>',        ParagraphStyle('sh', fontName='Helvetica-Bold', fontSize=8, textColor=C_WHITE, alignment=1)),
+        Paragraph('<b>Malattia</b>',     ParagraphStyle('sh', fontName='Helvetica-Bold', fontSize=8, textColor=C_WHITE, alignment=1)),
+        Paragraph('<b>Riposo</b>',       ParagraphStyle('sh', fontName='Helvetica-Bold', fontSize=8, textColor=C_WHITE, alignment=1)),
+    ]
+    sum_data = [sum_header]
+    for dip in dip_list_sorted:
+        s = stats.get(dip.id, {})
+        def _v(k): return str(s.get(k, 0)) if s.get(k, 0) else '—'
+        sum_data.append([
+            Paragraph(dip.nome, ParagraphStyle('sn', fontName='Helvetica-Bold', fontSize=8, textColor=C_NAVY)),
+            Paragraph(dip.ruolo[:3], ParagraphStyle('sr', fontName='Helvetica', fontSize=7, textColor=colors.HexColor('#475569'))),
+            Paragraph(_v('lav'),  ParagraphStyle('sv', fontName='Helvetica', fontSize=8, textColor=C_NAVY, alignment=1)),
+            Paragraph(_v('ore'),  ParagraphStyle('sv', fontName='Helvetica-Bold', fontSize=8, textColor=C_NAVY2, alignment=1)),
+            Paragraph(_v('mat'),  ParagraphStyle('sv', fontName='Helvetica', fontSize=8, textColor=SHIFT_TEXT['MATTINO'], alignment=1)),
+            Paragraph(_v('pom'),  ParagraphStyle('sv', fontName='Helvetica', fontSize=8, textColor=SHIFT_TEXT['POMERIGGIO'], alignment=1)),
+            Paragraph(_v('not'),  ParagraphStyle('sv', fontName='Helvetica', fontSize=8, textColor=SHIFT_TEXT['NOTTE'], alignment=1)),
+            Paragraph(_v('smo'),  ParagraphStyle('sv', fontName='Helvetica', fontSize=8, textColor=SHIFT_TEXT['SMONTO'], alignment=1)),
+            Paragraph(_v('fer'),  ParagraphStyle('sv', fontName='Helvetica', fontSize=8, textColor=SHIFT_TEXT['FERIE'], alignment=1)),
+            Paragraph(_v('mal'),  ParagraphStyle('sv', fontName='Helvetica', fontSize=8, textColor=SHIFT_TEXT['MALATTIA'], alignment=1)),
+            Paragraph(_v('rip'),  ParagraphStyle('sv', fontName='Helvetica', fontSize=8, textColor=SHIFT_TEXT['RIPOSO'], alignment=1)),
+        ])
+
+    sum_col_w = [100, 45, 55, 50, 50, 55, 45, 45, 45, 55, 45]
+    sum_tbl = Table(sum_data, colWidths=sum_col_w)
+    sum_style_cmds = [
+        ('BACKGROUND',    (0, 0), (-1, 0), C_NAVY),
+        ('ALIGN',         (0, 0), (-1, -1), 'CENTER'),
+        ('ALIGN',         (0, 0), (1, -1),  'LEFT'),
+        ('VALIGN',        (0, 0), (-1, -1), 'MIDDLE'),
+        ('GRID',          (0, 0), (-1, -1), 0.3, C_BORDER),
+        ('TOPPADDING',    (0, 0), (-1, -1), 4),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+        ('LEFTPADDING',   (0, 0), (1, -1),  6),
+    ]
+    for ri in range(1, len(sum_data)):
+        sum_style_cmds.append(('BACKGROUND', (0, ri), (-1, ri), row_colors_bg[ri % 2]))
+    sum_tbl.setStyle(TableStyle(sum_style_cmds))
+    elements.append(sum_tbl)
+
+    # ── FOOTER ────────────────────────────────────────────────────────────────
+    elements.append(Spacer(1, 4*mm))
+    footer_p = Paragraph(
+        f'<font size="7" color="#94A3B8">SmartShift Pro  •  Report generato automaticamente  •  '
+        f'{datetime.now().strftime("%d/%m/%Y %H:%M")}  •  Riservatezza: USO INTERNO</font>',
+        ParagraphStyle('ft', alignment=1)
+    )
+    elements.append(footer_p)
+
     doc.build(elements)
     buffer.seek(0)
-    filename = f"report_{nome_mesi[int(mese)]}_{anno}.pdf"
+    filename = f"SmartShift_{nome_mesi[mese]}_{anno}.pdf"
     return send_file(buffer, as_attachment=True, download_name=filename, mimetype='application/pdf')
 
 
