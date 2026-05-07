@@ -16,7 +16,7 @@ import {
   Clock, Moon, CalendarOff, Pill, ArrowLeftRight, User,
   Settings2, Sun, Sunset, BedDouble, Check, Trash2,
   PlusCircle, AlertTriangle, Palmtree, CalendarX, RotateCcw, ShieldAlert, UserPlus, KeyRound,
-  Sparkles, ChevronDown,
+  Sparkles, ChevronDown, CalendarDays, Edit2, Save, X, Lock,
 } from "lucide-react";
 
 import type { Ruolo } from "@/lib/api";
@@ -179,7 +179,16 @@ export default function Dashboard() {
 
   /* Staff profile modal */
   const [profileTarget, setProfileTarget] = useState<Dipendente | null>(null);
-  const [profileTab, setProfileTab] = useState<"preferenze" | "assenze">("preferenze");
+  const [profileTab, setProfileTab] = useState<"preferenze" | "assenze" | "turni">("preferenze");
+
+  /* Staff turni tab */
+  const [staffTurni, setStaffTurni] = useState<Turno[]>([]);
+  const [staffTurniLoading, setStaffTurniLoading] = useState(false);
+  const [staffTurniMese, setStaffTurniMese] = useState(new Date().getMonth() + 1);
+  const [staffTurniAnno, setStaffTurniAnno] = useState(new Date().getFullYear());
+  const [editingTurnoId, setEditingTurnoId] = useState<number | null>(null);
+  const [editTipo, setEditTipo] = useState<string>("MATTINO");
+  const [editOre, setEditOre] = useState<number>(7);
 
   /* Preferences */
   const [prefSelected, setPrefSelected] = useState<Pref[]>([]);
@@ -237,6 +246,10 @@ export default function Dashboard() {
     setAssenze([]);
     setNewAssenza({ tipo: "MALATTIA", data_inizio: today, data_fine: today, note: "" });
     setAddingAssenza(false);
+    setStaffTurni([]);
+    setEditingTurnoId(null);
+    setStaffTurniMese(mese);
+    setStaffTurniAnno(anno);
   };
 
   /* Fetch absences for selected staff */
@@ -248,6 +261,38 @@ export default function Dashboard() {
       .then(setAssenze)
       .finally(() => setAssenzeLoading(false));
   }, [profileTarget, profileTab]);
+
+  /* Fetch shifts for selected staff (turni tab) */
+  useEffect(() => {
+    if (!profileTarget || profileTab !== "turni") return;
+    setStaffTurniLoading(true);
+    fetch(`/flask-api/api/turni?dipendente_id=${profileTarget.id}&mese=${staffTurniMese}&anno=${staffTurniAnno}`, { credentials: "include" })
+      .then((r) => r.ok ? r.json() : [])
+      .then((data: Turno[]) => setStaffTurni(data.sort((a, b) => a.data.localeCompare(b.data))))
+      .finally(() => setStaffTurniLoading(false));
+  }, [profileTarget, profileTab, staffTurniMese, staffTurniAnno]);
+
+  const handleEditTurnoSave = async (turnoId: number) => {
+    const res = await fetch(`/flask-api/api/turni/${turnoId}`, {
+      method: "PUT", headers: { "Content-Type": "application/json" }, credentials: "include",
+      body: JSON.stringify({ tipo: editTipo, ore: editOre }),
+    });
+    if (res.ok) {
+      const updated: Turno = await res.json();
+      setStaffTurni((prev) => prev.map((t) => t.id === turnoId ? updated : t));
+      setEditingTurnoId(null);
+      toast({ title: "Turno aggiornato" });
+    } else toast({ title: "Errore aggiornamento", variant: "destructive" });
+  };
+
+  const handleDeleteTurnoFromProfile = async (turnoId: number) => {
+    if (!confirm("Eliminare questo turno?")) return;
+    const res = await fetch(`/flask-api/api/turni/${turnoId}`, { method: "DELETE", credentials: "include" });
+    if (res.ok) {
+      setStaffTurni((prev) => prev.filter((t) => t.id !== turnoId));
+      toast({ title: "Turno eliminato" });
+    } else toast({ title: "Errore eliminazione", variant: "destructive" });
+  };
 
   /* ── Preferences save ── */
   const savePref = async () => {
@@ -566,18 +611,21 @@ export default function Dashboard() {
 
           {/* Tabs */}
           <div className="flex gap-1 bg-white/4 rounded-xl p-1 mt-1">
-            {(["preferenze", "assenze"] as const).map((tab) => (
+            {([
+              { key: "preferenze", label: "Preferenze", icon: Settings2 },
+              { key: "assenze",    label: "Assenze",    icon: CalendarX },
+              { key: "turni",      label: "Turni",      icon: CalendarDays },
+            ] as const).map(({ key, label, icon: Icon }) => (
               <button
-                key={tab}
-                onClick={() => setProfileTab(tab)}
+                key={key}
+                onClick={() => setProfileTab(key)}
                 className={`flex-1 py-2 rounded-lg text-xs font-semibold uppercase tracking-wide transition-all ${
-                  profileTab === tab
+                  profileTab === key
                     ? "bg-amber-500/20 text-amber-400 border border-amber-500/30"
                     : "text-muted-foreground hover:text-foreground"
                 }`}
               >
-                {tab === "preferenze" ? <span className="flex items-center justify-center gap-1.5"><Settings2 className="h-3 w-3" />Preferenze</span>
-                                      : <span className="flex items-center justify-center gap-1.5"><CalendarX className="h-3 w-3" />Assenze</span>}
+                <span className="flex items-center justify-center gap-1"><Icon className="h-3 w-3" />{label}</span>
               </button>
             ))}
           </div>
@@ -708,6 +756,129 @@ export default function Dashboard() {
                   </div>
                 )}
               </div>
+            </div>
+          )}
+          {/* ── Tab: Turni ── */}
+          {profileTab === "turni" && (
+            <div className="space-y-3 mt-2">
+              {/* Month / Year selector */}
+              <div className="flex items-center gap-2">
+                <select
+                  value={staffTurniMese}
+                  onChange={(e) => setStaffTurniMese(Number(e.target.value))}
+                  className="flex-1 bg-white/5 border border-white/10 rounded-lg px-2 h-8 text-xs text-foreground"
+                >
+                  {["Gen","Feb","Mar","Apr","Mag","Giu","Lug","Ago","Set","Ott","Nov","Dic"].map((m, idx) => (
+                    <option key={idx + 1} value={idx + 1}>{m}</option>
+                  ))}
+                </select>
+                <select
+                  value={staffTurniAnno}
+                  onChange={(e) => setStaffTurniAnno(Number(e.target.value))}
+                  className="w-20 bg-white/5 border border-white/10 rounded-lg px-2 h-8 text-xs text-foreground"
+                >
+                  {[anno - 1, anno, anno + 1].map((y) => <option key={y} value={y}>{y}</option>)}
+                </select>
+              </div>
+
+              {/* Total hours summary */}
+              {!staffTurniLoading && staffTurni.length > 0 && (
+                <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-amber-500/8 border border-amber-500/20">
+                  <Clock className="h-3.5 w-3.5 text-amber-400 shrink-0" />
+                  <span className="text-xs text-amber-300 font-semibold">
+                    {staffTurni.reduce((s, t) => s + (t.ore ?? 0), 0)}h totali —{" "}
+                    {staffTurni.filter((t) => !["RIPOSO","FERIE","MALATTIA","SMONTO"].includes(t.tipo)).length} giorni lavorativi
+                  </span>
+                </div>
+              )}
+
+              {/* Shifts list */}
+              {staffTurniLoading ? (
+                <p className="text-sm text-muted-foreground text-center py-6">Caricamento...</p>
+              ) : staffTurni.length === 0 ? (
+                <div className="rounded-xl bg-white/3 border border-white/8 p-6 text-center">
+                  <CalendarDays className="h-6 w-6 text-muted-foreground/20 mx-auto mb-2" />
+                  <p className="text-sm text-muted-foreground">Nessun turno per questo mese</p>
+                </div>
+              ) : (
+                <div className="space-y-1.5 max-h-72 overflow-y-auto pr-1">
+                  {staffTurni.map((turno) => {
+                    const isEditing = editingTurnoId === turno.id;
+                    const d = new Date(turno.data + "T00:00:00");
+                    const dateLabel = d.toLocaleDateString("it-IT", { weekday: "short", day: "numeric", month: "short" });
+                    return (
+                      <div key={turno.id} className={`rounded-xl border transition-all ${isEditing ? "bg-amber-500/8 border-amber-500/25" : "bg-white/3 border-white/8"}`}>
+                        {!isEditing ? (
+                          <div className="flex items-center gap-2 px-3 py-2">
+                            <span className="text-xs text-muted-foreground w-20 shrink-0 capitalize">{dateLabel}</span>
+                            <ShiftBadge type={turno.tipo} />
+                            {turno.ore > 0 && <span className="text-xs text-muted-foreground">{turno.ore}h</span>}
+                            {turno.manuale && <span title="Turno manuale"><Lock className="h-3 w-3 text-amber-400/60 shrink-0" /></span>}
+                            <div className="flex items-center gap-1 ml-auto shrink-0">
+                              <button
+                                onClick={() => { setEditingTurnoId(turno.id); setEditTipo(turno.tipo); setEditOre(turno.ore); }}
+                                className="p-1 rounded text-muted-foreground hover:text-amber-400 hover:bg-amber-500/10 transition-colors"
+                                title="Modifica"
+                              >
+                                <Edit2 className="h-3 w-3" />
+                              </button>
+                              <button
+                                onClick={() => handleDeleteTurnoFromProfile(turno.id)}
+                                className="p-1 rounded text-muted-foreground hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                                title="Elimina"
+                              >
+                                <Trash2 className="h-3 w-3" />
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="p-3 space-y-2">
+                            <p className="text-xs font-semibold text-amber-400 capitalize">{dateLabel}</p>
+                            <div className="flex gap-2">
+                              <select
+                                value={editTipo}
+                                onChange={(e) => {
+                                  const t = e.target.value;
+                                  setEditTipo(t);
+                                  setEditOre({"MATTINO":7,"POMERIGGIO":7,"NOTTE":10,"SMONTO":0,"FERIE":0,"MALATTIA":0,"RIPOSO":0}[t] ?? 7);
+                                }}
+                                className="flex-1 bg-white/5 border border-white/10 rounded-lg px-2 h-8 text-xs text-foreground"
+                              >
+                                {["MATTINO","POMERIGGIO","NOTTE","SMONTO","FERIE","MALATTIA","RIPOSO"].map((t) => (
+                                  <option key={t} value={t}>{t}</option>
+                                ))}
+                              </select>
+                              <input
+                                type="number"
+                                min={0}
+                                max={12}
+                                value={editOre}
+                                onChange={(e) => setEditOre(Number(e.target.value))}
+                                className="w-16 bg-white/5 border border-white/10 rounded-lg px-2 h-8 text-xs text-foreground text-center"
+                                placeholder="ore"
+                              />
+                            </div>
+                            <div className="flex gap-2">
+                              <button
+                                onClick={() => handleEditTurnoSave(turno.id)}
+                                className="flex-1 flex items-center justify-center gap-1 py-1.5 rounded-lg text-xs font-semibold bg-amber-500/20 text-amber-400 border border-amber-500/30 hover:bg-amber-500/30 transition-colors"
+                              >
+                                <Save className="h-3 w-3" />Salva
+                              </button>
+                              <button
+                                onClick={() => setEditingTurnoId(null)}
+                                className="flex-1 flex items-center justify-center gap-1 py-1.5 rounded-lg text-xs font-semibold bg-white/5 text-muted-foreground border border-white/10 hover:bg-white/10 transition-colors"
+                              >
+                                <X className="h-3 w-3" />Annulla
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           )}
         </DialogContent>

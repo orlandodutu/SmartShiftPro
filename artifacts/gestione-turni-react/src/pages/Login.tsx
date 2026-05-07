@@ -3,6 +3,27 @@ import { useAuth } from "@/contexts/AuthContext";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 
+function playSparkle() {
+  try {
+    const ctx = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
+    const t = ctx.currentTime;
+    [0, 0.12, 0.24].forEach((delay, i) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.type = "sine";
+      const baseFreq = 880 * Math.pow(1.5, i);
+      osc.frequency.setValueAtTime(baseFreq, t + delay);
+      osc.frequency.exponentialRampToValueAtTime(baseFreq * 2, t + delay + 0.28);
+      gain.gain.setValueAtTime(0.18, t + delay);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + delay + 0.55);
+      osc.start(t + delay);
+      osc.stop(t + delay + 0.55);
+    });
+  } catch { }
+}
+
 export default function Login() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -22,6 +43,7 @@ export default function Login() {
       });
       const data = await res.json();
       if (res.ok && data.success) {
+        playSparkle();
         login(data);
       } else {
         toast({

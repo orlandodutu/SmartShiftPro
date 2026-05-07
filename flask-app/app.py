@@ -604,14 +604,17 @@ def _genera_interno(data_inizio_str, giorni):
     generati = 0
     saltati  = 0
 
+    # Hour equalization: track running cumulative hours per employee for this generation
+    ore_corrente: dict = {d.id: (d.ore_totali or 0) for d in all_dip}
+
     # ── Weekly trackers (per calendar week, keyed by Monday date string) ──
-    # oss_riposi_week: (dip_id, cal_week) -> True  — already received RIPOSO this week
-    # oss_notti_week:  (dip_id, cal_week) -> True  — already did NOTTE this week
-    # aus_riposi_week: (dip_id, cal_week) -> True
     oss_riposi_week: dict = {}
     oss_notti_week:  dict = {}
-    aus_riposi_week: dict = {}
     last_cal_week:   str  = ''
+
+    # ── AUS 6-day block tracker (keyed by (dip_id, block6) where block6 = ordinal // 6) ──
+    aus_riposi_6d:  dict = {}
+    last_aus_block: int  = -1
 
     for i in range(giorni):
         giorno   = data_inizio + timedelta(days=i)
@@ -624,8 +627,7 @@ def _genera_interno(data_inizio_str, giorni):
         cal_week   = cal_monday.strftime('%Y-%m-%d')
         cal_sunday = (cal_monday + timedelta(days=6)).strftime('%Y-%m-%d')
 
-        # On entering a new calendar week: load existing RIPOSO/NOTTE from DB.
-        # This ensures single-day generation also respects pre-existing turni.
+        # On entering a new calendar week: load existing RIPOSO/NOTTE for OSS from DB.
         if cal_week != last_cal_week:
             last_cal_week = cal_week
             for r in Turno.query.filter(
@@ -634,13 +636,29 @@ def _genera_interno(data_inizio_str, giorni):
                 Turno.data <= cal_sunday,
             ).all():
                 oss_riposi_week[(r.dipendente_id, cal_week)] = True
-                aus_riposi_week[(r.dipendente_id, cal_week)] = True
             for r in Turno.query.filter(
                 Turno.tipo == 'NOTTE',
                 Turno.data >= cal_week,
                 Turno.data <= cal_sunday,
             ).all():
                 oss_notti_week[(r.dipendente_id, cal_week)] = True
+
+        # On entering a new 6-day block: load existing RIPOSO for AUS from DB.
+        aus_block = giorno.toordinal() // 6
+        if aus_block != last_aus_block:
+            last_aus_block = aus_block
+            blk_start = date.fromordinal(aus_block * 6).strftime('%Y-%m-%d')
+            blk_end   = date.fromordinal(aus_block * 6 + 5).strftime('%Y-%m-%d')
+            aus_ids   = [d.id for d in ausiliari]
+            if aus_ids:
+                for r in Turno.query.filter(
+                    Turno.tipo == 'RIPOSO',
+                    Turno.data >= blk_start,
+                    Turno.data <= blk_end,
+                    Turno.dipendente_id.in_(aus_ids)
+                ).all():
+                    b = date.fromisoformat(r.data).toordinal() // 6
+                    aus_riposi_6d[(r.dipendente_id, b)] = True
 
         # IDs with any existing shift today
         gia = {t.dipendente_id for t in Turno.query.filter_by(data=data_str).all()}
@@ -669,6 +687,7 @@ def _genera_interno(data_inizio_str, giorni):
             gia.add(dip.id)
             if dip.ruolo != 'CAPOSALA':
                 dip.ore_totali += ore
+                ore_corrente[dip.id] = ore_corrente.get(dip.id, 0) + ore
             if tipo == 'NOTTE':    dip.notti_fatte += 1
             elif tipo == 'FERIE':  dip.ferie       += 1
             elif tipo == 'MALATTIA': dip.malattia  += 1
@@ -710,8 +729,14 @@ def _genera_interno(data_inizio_str, giorni):
         # Selecting the NOTTE worker BEFORE section 4 guarantees coverage even on Sunday
         # when all notte-eligible OSS would otherwise end up in must_rest and get RIPOSO.
         notte_riserva_id = None
-        for offset in range(len(oss_notturni)):
-            cand = oss_notturni[(i + offset) % len(oss_notturni)]
+        # Sort NOTTE candidates by hours descending: highest-hour person gets NOTTE first.
+        # NOTTE(10h)+SMONTO(0h)+RIPOSO(0h) = only 10h for 3 days → balances those with more hours.
+        notte_cands_sorted = sorted(
+            oss_notturni,
+            key=lambda d: ore_corrente.get(d.id, 0),
+            reverse=True
+        )
+        for cand in notte_cands_sorted:
             if cand.id in gia or cand.id in assenti_ids:
                 continue
             if oss_notti_week.get((cand.id, cal_week), False):
@@ -719,8 +744,7 @@ def _genera_interno(data_inizio_str, giorni):
             notte_riserva_id = cand.id
             break
         if notte_riserva_id is None:
-            for offset in range(len(oss_notturni)):
-                cand = oss_notturni[(i + offset) % len(oss_notturni)]
+            for cand in notte_cands_sorted:
                 if cand.id not in gia and cand.id not in assenti_ids:
                     notte_riserva_id = cand.id
                     break
@@ -757,8 +781,9 @@ def _genera_interno(data_inizio_str, giorni):
                 oss_may_rest.append(dip)
 
         # Fill coverage slots from rested + may_rest first (workers)
+        # Sort by fewest hours first → equalization across the month
         workers = oss_rested + oss_may_rest
-        workers.sort(key=lambda d: (all_oss.index(d) + i) % n if n else 0)
+        workers.sort(key=lambda d: ore_corrente.get(d.id, 0))
 
         m_c = p_c = 0
         for dip in workers:
@@ -770,6 +795,8 @@ def _genera_interno(data_inizio_str, giorni):
                 crea(dip, 'MATTINO');    m_c += 1
 
         # Pull from must_rest SOLO se la copertura è sotto il minimo critico
+        # Sort by most hours first (they can "afford" to lose a rest day)
+        oss_must_rest.sort(key=lambda d: ore_corrente.get(d.id, 0), reverse=True)
         for dip in list(oss_must_rest):
             if m_c < 2:
                 oss_must_rest.remove(dip)
@@ -811,6 +838,7 @@ def _genera_interno(data_inizio_str, giorni):
             db.session.add(t)
             gia.add(candidate.id)
             candidate.ore_totali += ore_n
+            ore_corrente[candidate.id] = ore_corrente.get(candidate.id, 0) + ore_n
             candidate.notti_fatte += 1
             oss_notti_week[(candidate.id, cal_week)] = True
             generati += 1
@@ -856,21 +884,26 @@ def _genera_interno(data_inizio_str, giorni):
                     _add_notte_direct(candidate, 'MATTINO')
                     break
 
-        # ── 5. Ausiliari: 07–15 (8h), urgency-based exactly 1 RIPOSO per calendar week ──
+        # ── 5. Ausiliari: 07–15, exactly 1 RIPOSO every 6 days (block-based) ──
+        # aus_block computed above when loading DB records.
+        # Each AUS rests on the day within the 6-day block matching their rank-offset.
         n_aus = len(ausiliari)
         aus_libere = [d for d in ausiliari if d.id not in gia and d.id not in assenti_ids]
 
         aus_must_rest = []
         aus_workers   = []
 
+        day_in_block        = giorno.toordinal() % 6       # 0–5 position within current 6-day block
+        is_last_day_of_block = (day_in_block == 5) or (i == giorni - 1)
+
         for dip in aus_libere:
-            ha_riposato  = aus_riposi_week.get((dip.id, cal_week), False)
+            ha_riposato = aus_riposi_6d.get((dip.id, aus_block), False)
             if ha_riposato:
                 aus_workers.append(dip)
                 continue
-            p_rank       = ausiliari.index(dip)
-            rest_weekday = (p_rank + week_num_local) % 7
-            if weekday == rest_weekday or is_last_day_of_week:
+            p_rank           = ausiliari.index(dip)
+            rest_day_in_block = (p_rank + aus_block) % 6
+            if day_in_block == rest_day_in_block or is_last_day_of_block:
                 aus_must_rest.append(dip)
             else:
                 aus_workers.append(dip)
@@ -885,7 +918,7 @@ def _genera_interno(data_inizio_str, giorni):
 
         for dip in aus_must_rest:
             crea(dip, 'RIPOSO')
-            aus_riposi_week[(dip.id, cal_week)] = True
+            aus_riposi_6d[(dip.id, aus_block)] = True
 
         db.session.commit()
 
