@@ -282,6 +282,7 @@ export default function Dashboard() {
       setStaffTurni((prev) => prev.map((t) => t.id === turnoId ? updated : t));
       setEditingTurnoId(null);
       toast({ title: "Turno aggiornato" });
+      fetchData();
     } else toast({ title: "Errore aggiornamento", variant: "destructive" });
   };
 
@@ -291,6 +292,7 @@ export default function Dashboard() {
     if (res.ok) {
       setStaffTurni((prev) => prev.filter((t) => t.id !== turnoId));
       toast({ title: "Turno eliminato" });
+      fetchData();
     } else toast({ title: "Errore eliminazione", variant: "destructive" });
   };
 
