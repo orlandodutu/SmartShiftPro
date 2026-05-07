@@ -884,11 +884,17 @@ def _genera_interno(data_inizio_str, giorni):
                     _add_notte_direct(candidate, 'MATTINO')
                     break
 
-        # ── 4c. MATTINO+POMERIGGIO doubles for non-night OSS ──
-        # OSS who cannot do NOTTE (no NOTTE in preferenze) often cover both daytime
-        # slots in real-world practice. We mirror this: if POMERIGGIO coverage is still
-        # short after regular assignment, let non-night OSS already on MATTINO take
-        # POMERIGGIO too. Sorted by fewest hours first for equalization.
+        # ── 4c. MATTINO+POMERIGGIO doubles ──
+        # Non-night OSS regularly cover MAT+POM.
+        # Night-eligible OSS (Carmen, Barbara, Elena) accumulate far fewer hours per
+        # NOTTE cycle (10h for 3 days vs 21h for 3 regular shifts). To equalize monthly
+        # totals we also allow them to take MAT+POM doubles on days they are NOT already
+        # assigned a NOTTE. The lowest-hours worker gets the double first.
+        notte_oggi_ids = {
+            t.dipendente_id
+            for t in Turno.query.filter_by(data=data_str, tipo='NOTTE').all()
+        }
+
         if p_c < 2:
             mat_ids_oggi = {
                 t.dipendente_id
@@ -896,9 +902,9 @@ def _genera_interno(data_inizio_str, giorni):
             }
             candidati_dop = sorted(
                 [d for d in all_oss
-                 if not is_notte_eligible(d)
-                 and d.id in mat_ids_oggi
-                 and d.id not in assenti_ids],
+                 if d.id in mat_ids_oggi
+                 and d.id not in assenti_ids
+                 and d.id not in notte_oggi_ids],
                 key=lambda d: ore_corrente.get(d.id, 0)
             )
             for dip in candidati_dop:
@@ -914,8 +920,8 @@ def _genera_interno(data_inizio_str, giorni):
                 generati += 1
                 p_c += 1
 
-        # Symmetrical: if MATTINO coverage is still short, non-night OSS on POMERIGGIO
-        # can also take a MATTINO slot (rarer but possible).
+        # Symmetrical: if MATTINO coverage is still short, any OSS on POMERIGGIO
+        # (who has no NOTTE today) can add a MATTINO slot.
         if m_c < 3:
             pom_ids_oggi = {
                 t.dipendente_id
@@ -923,9 +929,9 @@ def _genera_interno(data_inizio_str, giorni):
             }
             candidati_mat = sorted(
                 [d for d in all_oss
-                 if not is_notte_eligible(d)
-                 and d.id in pom_ids_oggi
-                 and d.id not in assenti_ids],
+                 if d.id in pom_ids_oggi
+                 and d.id not in assenti_ids
+                 and d.id not in notte_oggi_ids],
                 key=lambda d: ore_corrente.get(d.id, 0)
             )
             for dip in candidati_mat:
