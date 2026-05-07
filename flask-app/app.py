@@ -662,6 +662,8 @@ def _genera_interno(data_inizio_str, giorni):
                 saltati += 1
                 return False
             ore = ore_override if ore_override is not None else ORE_MAP.get(tipo, 0)
+            if not ora_inizio:
+                ora_inizio = {'MATTINO': '07:00', 'POMERIGGIO': '14:00', 'NOTTE': '21:00'}.get(tipo, '')
             t = Turno(dipendente_id=dip.id, data=data_str, tipo=tipo, ore=ore, note='Auto', manuale=False, ora_inizio=ora_inizio)
             db.session.add(t)
             gia.add(dip.id)
@@ -1008,8 +1010,8 @@ def reset_mese():
     if 'user_id' not in session:
         return jsonify({'errore': 'Non autenticato'}), 401
     richiedente = db.session.get(Dipendente, session['user_id'])
-    if not richiedente or not richiedente.is_admin:
-        return jsonify({'errore': 'Non autorizzato — solo admin'}), 403
+    if not richiedente or not (richiedente.is_admin or richiedente.ruolo == 'CAPOSALA'):
+        return jsonify({'errore': 'Non autorizzato'}), 403
     data = request.json or {}
     mese = data.get('mese', date.today().strftime('%Y-%m'))
     turni = Turno.query.filter(
@@ -1029,6 +1031,39 @@ def reset_mese():
         eliminati += 1
     db.session.commit()
     return jsonify({'success': True, 'eliminati': eliminati, 'mese': mese})
+
+
+@api.route('/api/turni/cancella_periodo', methods=['POST'])
+def cancella_periodo():
+    if 'user_id' not in session:
+        return jsonify({'errore': 'Non autenticato'}), 401
+    richiedente = db.session.get(Dipendente, session['user_id'])
+    if not richiedente or not (richiedente.is_admin or richiedente.ruolo == 'CAPOSALA'):
+        return jsonify({'errore': 'Non autorizzato'}), 403
+    data = request.json or {}
+    data_inizio = data.get('data_inizio', '')
+    data_fine   = data.get('data_fine', '')
+    if not data_inizio or not data_fine:
+        return jsonify({'errore': 'data_inizio e data_fine richiesti'}), 400
+    if data_fine < data_inizio:
+        return jsonify({'errore': 'data_fine deve essere uguale o successiva a data_inizio'}), 400
+    turni = Turno.query.filter(
+        Turno.data >= data_inizio,
+        Turno.data <= data_fine,
+        Turno.manuale == False,
+    ).all()
+    eliminati = 0
+    for t in turni:
+        dip = t.dipendente
+        if dip and dip.ruolo != 'CAPOSALA':
+            dip.ore_totali    = max(0, dip.ore_totali - t.ore)
+            if t.tipo == 'NOTTE':      dip.notti_fatte = max(0, dip.notti_fatte - 1)
+            elif t.tipo == 'FERIE':    dip.ferie       = max(0, dip.ferie - 1)
+            elif t.tipo == 'MALATTIA': dip.malattia    = max(0, dip.malattia - 1)
+        db.session.delete(t)
+        eliminati += 1
+    db.session.commit()
+    return jsonify({'success': True, 'eliminati': eliminati, 'da': data_inizio, 'a': data_fine})
 
 
 @api.route('/api/scambi/suggeriti', methods=['GET'])

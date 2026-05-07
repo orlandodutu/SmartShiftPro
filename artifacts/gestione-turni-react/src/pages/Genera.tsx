@@ -6,7 +6,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
-import { Wand2, CheckCircle2, CalendarDays, Lock, RotateCcw, AlertTriangle } from "lucide-react";
+import { Wand2, CheckCircle2, CalendarDays, Lock, RotateCcw, AlertTriangle, Trash2 } from "lucide-react";
+import { Button } from "@/components/ui/button";
 
 type Modalita = "settimana" | "mese" | "giorno";
 
@@ -25,15 +26,28 @@ export default function Genera() {
       </div>
     );
   }
+
+  const canManage = user?.is_admin || user?.ruolo === "CAPOSALA";
+  const today = new Date().toISOString().split("T")[0];
+
   const [loading, setLoading] = useState(false);
   const [modalita, setModalita] = useState<Modalita>("settimana");
-  const [dataInizio, setDataInizio] = useState(new Date().toISOString().split("T")[0]);
+  const [dataInizio, setDataInizio] = useState(today);
   const [result, setResult] = useState<{ generati: number; saltati: number; giorni: number; modalita: string } | null>(null);
 
   const currentMese = new Date().toISOString().substring(0, 7);
+
+  /* ── Reset mese corrente ── */
   const [resetOpen, setResetOpen] = useState(false);
   const [resetInput, setResetInput] = useState("");
   const [resetLoading, setResetLoading] = useState(false);
+
+  /* ── Cancella periodo personalizzato ── */
+  const [periodoOpen, setPeriodoOpen] = useState(false);
+  const [periodoInizio, setPeriodoInizio] = useState(today);
+  const [periodoFine, setPeriodoFine] = useState(today);
+  const [periodoLoading, setPeriodoLoading] = useState(false);
+  const [periodoConfirm, setPeriodoConfirm] = useState("");
 
   const handleGenera = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -98,6 +112,31 @@ export default function Genera() {
     }
   };
 
+  const handleCancellaPeriodo = async () => {
+    setPeriodoLoading(true);
+    try {
+      const res = await fetch("/flask-api/api/turni/cancella_periodo", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ data_inizio: periodoInizio, data_fine: periodoFine }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        toast({ title: `${data.eliminati} turni eliminati dal ${periodoInizio} al ${periodoFine}` });
+        setPeriodoOpen(false);
+        setPeriodoConfirm("");
+        setResult(null);
+      } else {
+        toast({ title: data.errore || "Errore", variant: "destructive" });
+      }
+    } catch {
+      toast({ title: "Errore di connessione", variant: "destructive" });
+    } finally {
+      setPeriodoLoading(false);
+    }
+  };
+
   const MODALITA_LABELS: Record<Modalita, string> = {
     settimana: "1 Settimana (7 giorni)",
     mese: "1 Mese (30 giorni)",
@@ -120,23 +159,24 @@ export default function Genera() {
       <div className="rounded-2xl bg-white/3 border border-white/8 p-5 space-y-3">
         <p className="text-xs font-bold text-muted-foreground uppercase tracking-wide">Regole di Generazione</p>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs text-muted-foreground">
-          <div className="flex gap-2"><span className="text-amber-400 font-bold shrink-0">Admin</span> Fisso Mattino (07–14), riposo Dom</div>
-          <div className="flex gap-2"><span className="text-emerald-400 font-bold shrink-0">INF</span> Solo Mattino, riposo Sab/Dom alternati</div>
-          <div className="flex gap-2"><span className="text-blue-400 font-bold shrink-0">OSS</span> Min 3 mattino, 2 pomeriggio, 1 notte*</div>
-          <div className="flex gap-2"><span className="text-amber-300 font-bold shrink-0">AUS</span> 07–15 (8h), separati da OSS, min 1/giorno</div>
-          <div className="flex gap-2 md:col-span-2"><span className="text-violet-400 font-bold shrink-0">Notte→Smonto→Riposo</span> Catena automatica post-notte</div>
+          <div className="flex gap-2"><span className="text-amber-400 font-bold shrink-0">Admin</span> Fisso Mattino 07:00–14:00, riposo Dom</div>
+          <div className="flex gap-2"><span className="text-emerald-400 font-bold shrink-0">INF</span> Solo Mattino 07:00–14:00, riposo Sab/Dom alternati</div>
+          <div className="flex gap-2"><span className="text-blue-400 font-bold shrink-0">OSS</span> Min 3 mattino (07–14), 3 pomeriggio (14–21), 1 notte</div>
+          <div className="flex gap-2"><span className="text-amber-300 font-bold shrink-0">AUS</span> 07:00–14:00 (7h), separati da OSS, min 1/giorno</div>
+          <div className="flex gap-2 md:col-span-2"><span className="text-violet-400 font-bold shrink-0">Notte→Smonto→Riposo</span> Catena automatica post-notte. Doppie consentite: Mat+Notte o Pom+Notte</div>
           <div className="flex gap-2 md:col-span-2">
             <Lock className="h-3 w-3 text-amber-400 shrink-0 mt-0.5" />
-            <span>I turni modificati manualmente sono bloccati e non vengono sovrascritti</span>
+            <span>I turni modificati manualmente (🔒) non vengono mai sovrascritti. Max 2 OSS a riposo/giorno.</span>
           </div>
         </div>
       </div>
 
+      {/* Generate form */}
       <Card className="glass border-white/8 shadow-none">
         <CardHeader>
           <CardTitle className="text-foreground">Parametri di Generazione</CardTitle>
           <CardDescription className="text-muted-foreground">
-            I turni esistenti non bloccati saranno saltati; i bloccati (🔒) rimarranno invariati.
+            I turni esistenti vengono saltati; i bloccati (🔒) rimangono invariati. Cancella il periodo prima di rigenerare.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -168,8 +208,8 @@ export default function Genera() {
               <div className="rounded-xl bg-amber-500/8 border border-amber-500/20 p-3 text-xs text-amber-300 flex gap-2">
                 <CalendarDays className="h-4 w-4 shrink-0 mt-0.5" />
                 <span>
-                  Generazione per <strong>un solo giorno</strong>. L'algoritmo considera i turni dei giorni precedenti 
-                  (es. chi ha fatto Notte ieri riceverà automaticamente Smonto oggi).
+                  Generazione per <strong>un solo giorno</strong>. L'algoritmo considera i turni precedenti
+                  (chi ha fatto Notte ieri riceve automaticamente Smonto oggi).
                 </span>
               </div>
             )}
@@ -205,11 +245,35 @@ export default function Genera() {
         </CardContent>
       </Card>
 
-      {/* ── Danger Zone — only admin ── */}
-      {user?.is_admin && (
+      {/* ── Cancella Periodo (Admin + Caposala) ── */}
+      {canManage && (
+        <div className="rounded-2xl border border-orange-500/20 bg-orange-500/4 p-5 space-y-3">
+          <p className="text-xs font-bold text-orange-400/80 uppercase tracking-wide flex items-center gap-2">
+            <Trash2 className="h-3.5 w-3.5" />Cancella Turni per Periodo
+          </p>
+          <div className="flex items-start gap-4 flex-wrap">
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold text-foreground">Elimina i turni di un periodo specifico</p>
+              <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
+                Cancella tutti i turni <strong className="text-foreground">auto-generati</strong> tra due date a scelta.
+                I turni manuali 🔒 vengono preservati. Usa per ricalcolare una settimana o un periodo sbagliato.
+              </p>
+            </div>
+            <Button
+              variant="outline"
+              onClick={() => { setPeriodoOpen(true); setPeriodoInizio(today); setPeriodoFine(today); setPeriodoConfirm(""); }}
+              className="shrink-0 border-orange-500/30 text-orange-400 hover:bg-orange-500/10 min-h-[44px]">
+              <Trash2 className="h-4 w-4 mr-2" />Cancella Periodo
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* ── Reset mese corrente (Admin + Caposala) ── */}
+      {canManage && (
         <div className="rounded-2xl border border-red-500/20 bg-red-500/4 p-5 space-y-3">
           <p className="text-xs font-bold text-red-400/80 uppercase tracking-wide flex items-center gap-2">
-            <AlertTriangle className="h-3.5 w-3.5" />Zona Pericolosa
+            <AlertTriangle className="h-3.5 w-3.5" />Reset Mese Corrente
           </p>
           <div className="flex items-start gap-4 flex-wrap">
             <div className="flex-1 min-w-0">
@@ -223,13 +287,72 @@ export default function Genera() {
             <button
               onClick={() => setResetOpen(true)}
               className="shrink-0 flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold border border-red-500/30 text-red-400 hover:bg-red-500/10 active:bg-red-500/15 transition-all min-h-[44px]">
-              <RotateCcw className="h-4 w-4" />Reset
+              <RotateCcw className="h-4 w-4" />Reset Mese
             </button>
           </div>
         </div>
       )}
 
-      {/* ── Reset Confirmation Dialog ── */}
+      {/* ── Cancella Periodo Dialog ── */}
+      <Dialog open={periodoOpen} onOpenChange={(open) => { if (!open && !periodoLoading) { setPeriodoOpen(false); setPeriodoConfirm(""); } }}>
+        <DialogContent className="glass-strong border-white/10 max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-orange-400">
+              <Trash2 className="h-4 w-4" />Cancella Turni — Periodo
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <p className="text-sm text-muted-foreground leading-relaxed">
+              Verranno eliminati tutti i turni <strong className="text-foreground">auto-generati</strong> nel periodo selezionato.
+              I turni manuali 🔒 saranno mantenuti.
+            </p>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label className="text-xs text-muted-foreground">Dal</Label>
+                <Input type="date" value={periodoInizio}
+                  onChange={(e) => setPeriodoInizio(e.target.value)}
+                  className="border-white/10 bg-white/5" disabled={periodoLoading} />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs text-muted-foreground">Al</Label>
+                <Input type="date" value={periodoFine}
+                  onChange={(e) => setPeriodoFine(e.target.value)}
+                  min={periodoInizio}
+                  className="border-white/10 bg-white/5" disabled={periodoLoading} />
+              </div>
+            </div>
+            <div className="rounded-xl bg-orange-500/8 border border-orange-500/20 p-3">
+              <p className="text-xs text-orange-300">
+                Digita <strong className="font-mono">CANCELLA</strong> per sbloccare la conferma
+              </p>
+            </div>
+            <Input
+              value={periodoConfirm}
+              onChange={(e) => setPeriodoConfirm(e.target.value)}
+              placeholder="CANCELLA"
+              className="border-white/10 bg-white/5 font-mono text-center tracking-widest"
+              disabled={periodoLoading}
+            />
+            <div className="flex gap-3 pt-1">
+              <button
+                className="flex-1 py-2.5 rounded-xl text-sm font-semibold border border-white/10 text-muted-foreground hover:bg-white/5 transition-all min-h-[44px]"
+                onClick={() => { setPeriodoOpen(false); setPeriodoConfirm(""); }}
+                disabled={periodoLoading}>
+                Annulla
+              </button>
+              <button
+                disabled={periodoConfirm !== "CANCELLA" || periodoLoading || !periodoInizio || !periodoFine}
+                onClick={handleCancellaPeriodo}
+                className="flex-1 py-2.5 rounded-xl text-sm font-bold border border-orange-500/30 text-orange-400 hover:bg-orange-500/10 transition-all disabled:opacity-35 disabled:cursor-not-allowed min-h-[44px] flex items-center justify-center gap-2">
+                <Trash2 className="h-3.5 w-3.5" />
+                {periodoLoading ? "Cancello..." : "Conferma"}
+              </button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Reset Mese Dialog ── */}
       <Dialog open={resetOpen} onOpenChange={(open) => { setResetOpen(open); if (!open) setResetInput(""); }}>
         <DialogContent className="glass-strong border-white/10 max-w-sm">
           <DialogHeader>
