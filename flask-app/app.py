@@ -577,8 +577,8 @@ def statistiche():
 def _genera_interno(data_inizio_str, giorni):
     """Core shift generation logic. Called by both genera_turni and genera_giorno."""
     ORE_MAP = {'MATTINO': 7, 'POMERIGGIO': 7, 'NOTTE': 10, 'SMONTO': 0, 'RIPOSO': 0, 'FERIE': 0, 'MALATTIA': 0}
-    AUSILIARIO_ORE = 8
-    AUSILIARIO_ORARI = {'Marina': '07:00', 'Fabiana': '07:00', 'Angela': '08:00'}
+    AUSILIARIO_ORE = 7
+    AUSILIARIO_ORARI = {'Marina': '07:00', 'Fabiana': '07:00', 'Angela': '07:00'}
 
     try:
         data_inizio = datetime.strptime(data_inizio_str, '%Y-%m-%d').date()
@@ -762,7 +762,7 @@ def _genera_interno(data_inizio_str, giorni):
         for dip in workers:
             if m_c < 3:
                 crea(dip, 'MATTINO');    m_c += 1
-            elif p_c < 2:
+            elif p_c < 3:
                 crea(dip, 'POMERIGGIO'); p_c += 1
             else:
                 crea(dip, 'MATTINO');    m_c += 1
@@ -772,16 +772,35 @@ def _genera_interno(data_inizio_str, giorni):
             if m_c < 3:
                 oss_must_rest.remove(dip)
                 crea(dip, 'MATTINO');    m_c += 1
-            elif p_c < 2:
+            elif p_c < 3:
                 oss_must_rest.remove(dip)
                 crea(dip, 'POMERIGGIO'); p_c += 1
             else:
                 break
 
-        # Assign RIPOSO to must-rest OSS (post-SMONTO OR designated day OR last day)
-        for dip in oss_must_rest:
+        # Assign RIPOSO — max 2 OSS a riposo per giorno
+        # Post-SMONTO hanno priorità assoluta (non possono lavorare)
+        MAX_RIPOSO_GIORNO = 2
+        oss_must_rest_smonto = [d for d in oss_must_rest if d.id in smonto_ieri]
+        oss_must_rest_normali = [d for d in oss_must_rest if d.id not in smonto_ieri]
+
+        riposi_assegnati = 0
+        for dip in oss_must_rest_smonto:
             crea(dip, 'RIPOSO')
             oss_riposi_week[(dip.id, cal_week)] = True
+            riposi_assegnati += 1
+
+        for dip in oss_must_rest_normali:
+            if riposi_assegnati < MAX_RIPOSO_GIORNO:
+                crea(dip, 'RIPOSO')
+                oss_riposi_week[(dip.id, cal_week)] = True
+                riposi_assegnati += 1
+            else:
+                # Troppi a riposo oggi: sposta al mattino o pomeriggio
+                if p_c < 3:
+                    crea(dip, 'POMERIGGIO'); p_c += 1
+                else:
+                    crea(dip, 'MATTINO');    m_c += 1
 
         # ── 4b. NOTTE assignment — after regular OSS shifts to allow double shifts ──
         #
