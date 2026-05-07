@@ -710,10 +710,15 @@ def _genera_interno(data_inizio_str, giorni):
                 crea(dip, 'MATTINO', 7)
 
         # ── 2. Infermiera: MATTINO, rest Sun always, alt-Sat ──
+        # Guard: se ieri era già RIPOSO (es. sabato di riposo in settimana pari),
+        # la domenica lavora per evitare due riposi consecutivi.
         for dip in infermieri:
             if dip.id in gia: continue
             if weekday == 6:
-                crea(dip, 'RIPOSO')
+                if dip.id in riposo_ieri:
+                    crea(dip, 'MATTINO', 7)   # ieri già riposo → lavora domenica
+                else:
+                    crea(dip, 'RIPOSO')
             elif weekday == 5 and (i // 7) % 2 == 0:
                 crea(dip, 'RIPOSO')
             else:
