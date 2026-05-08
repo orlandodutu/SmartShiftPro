@@ -1867,9 +1867,11 @@ def startup_init():
             if 'archivio_mese' not in turno_cols:
                 conn.execute(text("ALTER TABLE turno ADD COLUMN archivio_mese VARCHAR(7) DEFAULT ''"))
             conn.execute(text("UPDATE dipendente SET ruolo='AUSILIARIO' WHERE ruolo='PULIZIE'"))
-            # ── Migrazione Giustina: rimuovi vecchi admin (Orlando, Caposala) e aggiungi Giustina ──
-            # Rimuovi is_admin da Orlando se esiste (non è più admin)
-            conn.execute(text("UPDATE dipendente SET is_admin=false WHERE LOWER(nome)='orlando'"))
+            # ── Migrazione Giustina: rimuovi vecchi admin e dipendenti obsoleti ──
+            # Elimina Orlando dal DB (sostituito da Giustina come unica admin)
+            conn.execute(text("DELETE FROM turno WHERE dipendente_id IN (SELECT id FROM dipendente WHERE LOWER(nome)='orlando')"))
+            conn.execute(text("DELETE FROM assenza WHERE dipendente_id IN (SELECT id FROM dipendente WHERE LOWER(nome)='orlando')"))
+            conn.execute(text("DELETE FROM dipendente WHERE LOWER(nome)='orlando'"))
             # Rimuovi is_admin da Caposala se esiste (non è più admin)
             conn.execute(text("UPDATE dipendente SET is_admin=false WHERE LOWER(nome)='caposala'"))
             # Crea Giustina se non esiste
