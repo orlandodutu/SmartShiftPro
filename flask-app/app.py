@@ -186,11 +186,17 @@ def inizializza_staff():
         print("Staff caricato!")
     else:
         # Ensure Caposala exists
-        if not Dipendente.query.filter_by(ruolo='CAPOSALA').first():
+        caposala = Dipendente.query.filter_by(ruolo='CAPOSALA').first()
+        if not caposala:
             caposala = Dipendente(nome='Caposala', ruolo='CAPOSALA', is_admin=True, password='caposala123')
             db.session.add(caposala)
             db.session.commit()
             print("Caposala aggiunto!")
+        elif not caposala.password_changed:
+            # Se non ha mai cambiato la password, garantisci la password di default
+            caposala.password = 'caposala123'
+            db.session.commit()
+            print("Caposala password ripristinata al default.")
 
 
 # ==========================================
@@ -264,6 +270,22 @@ def admin_reset_password(id):
     target.password_changed = False
     db.session.commit()
     return jsonify({'success': True, 'nome': target.nome})
+
+
+@api.route('/api/admin_reset_caposala', methods=['POST'])
+def admin_reset_caposala():
+    data = request.json or {}
+    master_pw = os.environ.get('MASTER_PASSWORD', '').strip()
+    if not master_pw or data.get('master') != master_pw:
+        return jsonify({'errore': 'Non autorizzato'}), 403
+    cap = Dipendente.query.filter_by(ruolo='CAPOSALA').first()
+    if not cap:
+        return jsonify({'errore': 'Caposala non trovata'}), 404
+    new_pw = data.get('new_password', 'caposala123')
+    cap.password = new_pw
+    cap.password_changed = True
+    db.session.commit()
+    return jsonify({'ok': True, 'nome': cap.nome, 'password': new_pw})
 
 
 @api.route('/api/logout', methods=['POST'])
