@@ -306,8 +306,42 @@ def aggiungi_assenza():
         note=note, creata_il=datetime.now().strftime('%Y-%m-%d %H:%M')
     )
     db.session.add(assenza)
+    db.session.flush()  # get assenza.id without full commit yet
+
+    # Auto-patch existing shifts in the date range and create missing ones
+    patched = 0
+    created = 0
+    ore_tipo = 0  # FERIE/MALATTIA have 0 hours
+    cur = date.fromisoformat(d_inizio)
+    end = date.fromisoformat(d_fine)
+    while cur <= end:
+        data_str = cur.strftime('%Y-%m-%d')
+        turno_es = Turno.query.filter_by(dipendente_id=int(dip_id), data=data_str).first()
+        if turno_es:
+            # Only overwrite if not already another absence type
+            if turno_es.tipo not in ('FERIE', 'MALATTIA'):
+                turno_es.tipo = tipo
+                turno_es.ore = ore_tipo
+                turno_es.manuale = True
+                patched += 1
+        else:
+            nuovo = Turno(
+                dipendente_id=int(dip_id),
+                data=data_str,
+                tipo=tipo,
+                ore=ore_tipo,
+                manuale=True,
+                archivio_mese=''
+            )
+            db.session.add(nuovo)
+            created += 1
+        cur += timedelta(days=1)
+
     db.session.commit()
-    return jsonify(assenza.to_dict()), 201
+    result = assenza.to_dict()
+    result['turni_aggiornati'] = patched
+    result['turni_creati'] = created
+    return jsonify(result), 201
 
 
 @api.route('/api/assenze/<int:id>', methods=['DELETE'])
@@ -320,9 +354,26 @@ def elimina_assenza(id):
     assenza = db.session.get(Assenza, id)
     if not assenza:
         return jsonify({'errore': 'Assenza non trovata'}), 404
+
+    # Remove auto-created manuale shifts in the absence period so algo can regenerate
+    dip_id_ass = assenza.dipendente_id
+    tipo_ass   = assenza.tipo
+    cur = date.fromisoformat(assenza.data_inizio)
+    end = date.fromisoformat(assenza.data_fine)
+    rimossi = 0
+    while cur <= end:
+        data_str = cur.strftime('%Y-%m-%d')
+        t = Turno.query.filter_by(
+            dipendente_id=dip_id_ass, data=data_str, tipo=tipo_ass, manuale=True
+        ).first()
+        if t:
+            db.session.delete(t)
+            rimossi += 1
+        cur += timedelta(days=1)
+
     db.session.delete(assenza)
     db.session.commit()
-    return jsonify({'success': True})
+    return jsonify({'success': True, 'turni_rimossi': rimossi})
 
 
 @api.route('/api/turni', methods=['GET'])
