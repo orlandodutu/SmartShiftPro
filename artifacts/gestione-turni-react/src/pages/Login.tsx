@@ -25,7 +25,7 @@ function playSparkle() {
 }
 
 export default function Login() {
-  const [username, setUsername] = useState("");
+  const [username, setUsername] = useState("giustina");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const { login } = useAuth();
@@ -136,7 +136,26 @@ export default function Login() {
           </button>
         </form>
 
-        <p className="text-xs text-muted-foreground mt-8 opacity-60">
+        {/* Credenziali suggerite */}
+        <div
+          className="mt-6 rounded-xl px-4 py-3 text-left"
+          style={{
+            background: "rgba(245,158,11,0.07)",
+            border: "1px solid rgba(245,158,11,0.2)",
+          }}
+        >
+          <p className="text-xs font-semibold text-amber-400 uppercase tracking-widest mb-2">Credenziali di accesso</p>
+          <div className="flex justify-between text-xs text-muted-foreground">
+            <span>Username</span>
+            <span className="font-mono text-foreground font-semibold">giustina</span>
+          </div>
+          <div className="flex justify-between text-xs text-muted-foreground mt-1">
+            <span>Password</span>
+            <span className="font-mono text-foreground font-semibold">••••••••</span>
+          </div>
+        </div>
+
+        <p className="text-xs text-muted-foreground mt-5 opacity-60">
           Area Riservata Personale Sanitario
         </p>
       </div>
