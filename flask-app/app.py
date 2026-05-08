@@ -963,6 +963,53 @@ def _genera_interno(data_inizio_str, giorni):
                 generati += 1
                 m_c += 1
 
+        # ── 4d. Equalization doubles for night-eligible OSS ──
+        # Each NOTTE cycle (NOTTE 10h + SMONTO 0h + RIPOSO 0h) gives only 10h for
+        # 3 days while non-night workers accumulate ~21h in the same period.
+        # This dedicated pass fires ONLY on regular working days (when the worker
+        # already has MATTINO or POMERIGGIO) and adds the complementary shift whenever
+        # the worker's running total is more than 7h below the OSS group average.
+        # Threshold = 7h ≈ 1 regular shift: fires ~1 extra double per NOTTE cycle,
+        # bridging the gap to ~173 h/month without overshooting.
+        if all_oss:
+            avg_ore_4d = sum(ore_corrente.get(d.id, 0) for d in all_oss) / len(all_oss)
+            mat_ids_4d = {
+                t.dipendente_id
+                for t in Turno.query.filter_by(data=data_str, tipo='MATTINO').all()
+            }
+            pom_ids_4d = {
+                t.dipendente_id
+                for t in Turno.query.filter_by(data=data_str, tipo='POMERIGGIO').all()
+            }
+            for dip in sorted(
+                [d for d in all_oss
+                 if is_notte_eligible(d)
+                 and d.id not in assenti_ids
+                 and d.id not in notte_oggi_ids],
+                key=lambda d: ore_corrente.get(d.id, 0)
+            ):
+                gap = avg_ore_4d - ore_corrente.get(dip.id, 0)
+                if gap <= 7:
+                    continue
+                if dip.id in mat_ids_4d and dip.id not in pom_ids_4d:
+                    ore_p = ORE_MAP['POMERIGGIO']
+                    db.session.add(Turno(
+                        dipendente_id=dip.id, data=data_str, tipo='POMERIGGIO',
+                        ore=ore_p, note='Auto (EQ)', manuale=False, ora_inizio='14:00'
+                    ))
+                    dip.ore_totali += ore_p
+                    ore_corrente[dip.id] = ore_corrente.get(dip.id, 0) + ore_p
+                    generati += 1
+                elif dip.id in pom_ids_4d and dip.id not in mat_ids_4d:
+                    ore_m = ORE_MAP['MATTINO']
+                    db.session.add(Turno(
+                        dipendente_id=dip.id, data=data_str, tipo='MATTINO',
+                        ore=ore_m, note='Auto (EQ)', manuale=False, ora_inizio='07:00'
+                    ))
+                    dip.ore_totali += ore_m
+                    ore_corrente[dip.id] = ore_corrente.get(dip.id, 0) + ore_m
+                    generati += 1
+
         # ── 5. Ausiliari: 07–15, exactly 1 RIPOSO every 6 days (block-based) ──
         # aus_block computed above when loading DB records.
         # Each AUS rests on the day within the 6-day block matching their rank-offset.
