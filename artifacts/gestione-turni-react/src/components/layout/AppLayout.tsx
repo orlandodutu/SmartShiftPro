@@ -1,11 +1,10 @@
-import { ReactNode, useEffect } from "react";
+import { ReactNode } from "react";
 import { Link, useLocation } from "wouter";
 import { useAuth } from "@/contexts/AuthContext";
-import { CalendarDays, LayoutDashboard, Shuffle, Wand2, LogOut, ShieldAlert, Activity, LayoutGrid, Archive } from "lucide-react";
+import { CalendarDays, LayoutDashboard, Wand2, LogOut, ShieldAlert, LayoutGrid, Archive } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { RoleBadge } from "@/components/ui/RoleBadge";
 import type { Ruolo } from "@/lib/api";
-import { useSwapNotifications } from "@/hooks/useSwapNotifications";
 
 const ROLE_BG_GLOW: Record<Ruolo, string> = {
   OSS:        "rgba(59,130,246,0.055)",
@@ -23,47 +22,20 @@ const ROLE_AVATAR: Record<Ruolo, string> = {
   CAPOSALA:   "bg-yellow-900/60 text-yellow-300",
 };
 
-const ROLE_DOT: Record<Ruolo, string> = {
-  OSS:        "bg-blue-400",
-  INFERMIERA: "bg-emerald-400",
-  AUSILIARIO: "bg-amber-400",
-  DEV:        "bg-indigo-400",
-  CAPOSALA:   "bg-yellow-400",
-};
-
 export function AppLayout({ children }: { children: ReactNode }) {
-  const { pendingCount } = useSwapNotifications();
   const { user, logout } = useAuth();
   const [location] = useLocation();
-  const role = (user?.ruolo ?? "OSS") as Ruolo;
-  const avatarClass = ROLE_AVATAR[role] ?? ROLE_AVATAR.OSS;
-  const dotClass = ROLE_DOT[role] ?? ROLE_DOT.OSS;
-
-  /* ── Heartbeat: aggiorna last_seen ogni 60s per il Monitor online ── */
-  useEffect(() => {
-    if (!user) return;
-    const ping = () => fetch("/flask-api/api/me", { credentials: "include" }).catch(() => {});
-    const id = setInterval(ping, 60_000);
-    return () => clearInterval(id);
-  }, [user]);
+  const role = (user?.ruolo ?? "DEV") as Ruolo;
+  const avatarClass = ROLE_AVATAR[role] ?? ROLE_AVATAR.DEV;
 
   const navItems = [
-    { href: "/dashboard", label: "Dashboard",    icon: LayoutDashboard },
-    { href: "/turni",     label: "Turni",         icon: CalendarDays    },
-    { href: "/scambi",    label: "Scambi",         icon: Shuffle         },
+    { href: "/dashboard",  label: "Dashboard",    icon: LayoutDashboard },
+    { href: "/turni",      label: "Turni",         icon: CalendarDays    },
+    { href: "/genera",     label: "Genera Turni",  icon: Wand2           },
+    { href: "/griglia",    label: "Griglia",       icon: LayoutGrid      },
+    { href: "/archivio",   label: "Archivio",      icon: Archive         },
+    { href: "/caposala",   label: "Gestione",      icon: ShieldAlert     },
   ];
-
-  if (user?.ruolo === "CAPOSALA" || user?.is_admin) {
-    navItems.push({ href: "/genera",   label: "Genera Turni", icon: Wand2      });
-    navItems.push({ href: "/griglia",  label: "Griglia",      icon: LayoutGrid });
-    navItems.push({ href: "/archivio", label: "Archivio",     icon: Archive    });
-  }
-  if (user?.ruolo === "CAPOSALA" || user?.is_admin) {
-    navItems.push({ href: "/caposala", label: "Area Caposala", icon: ShieldAlert });
-  }
-  if (user?.is_admin) {
-    navItems.push({ href: "/monitor", label: "Monitor",       icon: Activity });
-  }
 
   return (
     <div className="min-h-screen flex flex-col md:flex-row">
@@ -116,39 +88,18 @@ export function AppLayout({ children }: { children: ReactNode }) {
         <nav className="flex-1 px-3 py-4 space-y-0.5">
           {navItems.map((item) => {
             const isActive = location === item.href || (item.href !== "/" && location.startsWith(item.href));
-            const isMonitor = item.href === "/monitor";
             return (
               <Link
                 key={item.href}
                 href={item.href}
                 className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all ${
                   isActive
-                    ? isMonitor
-                      ? "bg-indigo-500/15 text-indigo-400 border border-indigo-500/20"
-                      : "bg-amber-500/15 text-amber-400 border border-amber-500/20"
+                    ? "bg-amber-500/15 text-amber-400 border border-amber-500/20"
                     : "text-muted-foreground hover:text-foreground hover:bg-white/5"
                 }`}
               >
-                <item.icon className={`h-4 w-4 shrink-0 ${
-                  isActive ? (isMonitor ? "text-indigo-400" : "text-amber-400") : "text-muted-foreground"
-                }`} />
+                <item.icon className={`h-4 w-4 shrink-0 ${isActive ? "text-amber-400" : "text-muted-foreground"}`} />
                 {item.label}
-                {item.href === "/scambi" && pendingCount > 0 && (
-                  <span className="ml-auto min-w-[1.25rem] h-5 px-1.5 rounded-full bg-amber-500 text-[10px] font-black text-slate-900 flex items-center justify-center animate-pulse">
-                    {pendingCount > 9 ? "9+" : pendingCount}
-                  </span>
-                )}
-                {item.href === "/caposala" && pendingCount > 0 && (
-                  <span className="ml-auto min-w-[1.25rem] h-5 px-1.5 rounded-full bg-amber-500 text-[10px] font-black text-slate-900 flex items-center justify-center animate-pulse">
-                    {pendingCount > 9 ? "9+" : pendingCount}
-                  </span>
-                )}
-                {item.href === "/caposala" && pendingCount === 0 && (
-                  <span className={`ml-auto h-1.5 w-1.5 rounded-full ${dotClass}`} />
-                )}
-                {isMonitor && !isActive && (
-                  <span className="ml-auto h-1.5 w-1.5 rounded-full bg-indigo-400 animate-pulse" />
-                )}
               </Link>
             );
           })}
@@ -163,7 +114,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
             <div className="flex-1 min-w-0">
               <p className="text-sm font-semibold text-foreground truncate leading-tight">{user?.nome}</p>
               <div className="mt-1">
-                <RoleBadge role={user?.ruolo ?? "OSS"} className="text-xs" />
+                <RoleBadge role={user?.ruolo ?? "DEV"} className="text-xs" />
               </div>
             </div>
           </div>
@@ -183,8 +134,8 @@ export function AppLayout({ children }: { children: ReactNode }) {
       <main
         className="flex-1 overflow-auto min-h-screen"
         style={{
-          background: `radial-gradient(ellipse at 75% 8%, ${ROLE_BG_GLOW[role] ?? ROLE_BG_GLOW.OSS} 0%, transparent 55%),
-                       radial-gradient(ellipse at 20% 90%, ${ROLE_BG_GLOW[role] ?? ROLE_BG_GLOW.OSS} 0%, transparent 45%)`,
+          background: `radial-gradient(ellipse at 75% 8%, ${ROLE_BG_GLOW[role] ?? ROLE_BG_GLOW.DEV} 0%, transparent 55%),
+                       radial-gradient(ellipse at 20% 90%, ${ROLE_BG_GLOW[role] ?? ROLE_BG_GLOW.DEV} 0%, transparent 45%)`,
         }}
       >
         {children}

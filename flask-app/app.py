@@ -124,79 +124,34 @@ class Assenza(db.Model):
         }
 
 
-class RichiestaScambio(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    richiedente_id = db.Column(db.Integer, db.ForeignKey('dipendente.id'), nullable=False)
-    destinatario_id = db.Column(db.Integer, db.ForeignKey('dipendente.id'), nullable=False)
-    turno_richiedente_id = db.Column(db.Integer, db.ForeignKey('turno.id'), nullable=False)
-    turno_destinatario_id = db.Column(db.Integer, db.ForeignKey('turno.id'), nullable=False)
-    stato = db.Column(db.String(20), default='IN_ATTESA')
-    nota = db.Column(db.String(300), default='')
-    nota_caposala = db.Column(db.String(300), default='')
-    creata_il = db.Column(db.String(20), default='')
-
-    richiedente = db.relationship('Dipendente', foreign_keys=[richiedente_id])
-    destinatario = db.relationship('Dipendente', foreign_keys=[destinatario_id])
-    turno_richiedente = db.relationship('Turno', foreign_keys=[turno_richiedente_id])
-    turno_destinatario = db.relationship('Turno', foreign_keys=[turno_destinatario_id])
-
-    def to_dict(self):
-        return {
-            'id': self.id,
-            'richiedente_id': self.richiedente_id,
-            'richiedente_nome': self.richiedente.nome,
-            'richiedente_ruolo': self.richiedente.ruolo,
-            'destinatario_id': self.destinatario_id,
-            'destinatario_nome': self.destinatario.nome,
-            'destinatario_ruolo': self.destinatario.ruolo,
-            'turno_richiedente': self.turno_richiedente.to_dict() if self.turno_richiedente else None,
-            'turno_destinatario': self.turno_destinatario.to_dict() if self.turno_destinatario else None,
-            'stato': self.stato,
-            'nota': self.nota,
-            'nota_caposala': self.nota_caposala,
-            'creata_il': self.creata_il
-        }
-
-
 # --- INIZIALIZZAZIONE STAFF ---
 
 def inizializza_staff():
-    staff_nomi = [
-        ("Orlando", "DEV", True),
-        ("Fabiana", "AUSILIARIO", False),
-        ("Marina", "AUSILIARIO", False),
-        ("Angela", "AUSILIARIO", False),
-        ("Carmen", "OSS", False),
-        ("Roberto", "OSS", False),
-        ("Barbara", "OSS", False),
-        ("Vittoria", "OSS", False),
-        ("Stefania 2", "OSS", False),
-        ("Anna", "INFERMIERA", False),
-        ("Stefania", "OSS", False),
-        ("Ioana", "OSS", False),
-        ("Elena", "OSS", False),
-        ("Caposala", "CAPOSALA", True),
+    """Garantisce che lo staff di base esista nel DB.
+    Unico admin: Giustina (DEV, is_admin=True) — accede con MASTER_PASSWORD.
+    """
+    staff_base = [
+        ("Fabiana",    "AUSILIARIO", False),
+        ("Marina",     "AUSILIARIO", False),
+        ("Angela",     "AUSILIARIO", False),
+        ("Carmen",     "OSS",        False),
+        ("Roberto",    "OSS",        False),
+        ("Barbara",    "OSS",        False),
+        ("Vittoria",   "OSS",        False),
+        ("Stefania 2", "OSS",        False),
+        ("Anna",       "INFERMIERA", False),
+        ("Stefania",   "OSS",        False),
+        ("Ioana",      "OSS",        False),
+        ("Elena",      "OSS",        False),
     ]
     if Dipendente.query.first() is None:
-        for nome, ruolo, is_admin in staff_nomi:
-            pw = 'caposala123' if ruolo == 'CAPOSALA' else 'password123'
-            nuovo = Dipendente(nome=nome, ruolo=ruolo, is_admin=is_admin, password=pw)
-            db.session.add(nuovo)
+        # Prima installazione: crea Giustina + tutto lo staff
+        giustina = Dipendente(nome='Giustina', ruolo='DEV', is_admin=True, password='')
+        db.session.add(giustina)
+        for nome, ruolo, is_admin in staff_base:
+            db.session.add(Dipendente(nome=nome, ruolo=ruolo, is_admin=is_admin, password=''))
         db.session.commit()
-        print("Staff caricato!")
-    else:
-        # Ensure Caposala exists
-        caposala = Dipendente.query.filter_by(ruolo='CAPOSALA').first()
-        if not caposala:
-            caposala = Dipendente(nome='Caposala', ruolo='CAPOSALA', is_admin=True, password='caposala123')
-            db.session.add(caposala)
-            db.session.commit()
-            print("Caposala aggiunto!")
-        elif not caposala.password_changed:
-            # Se non ha mai cambiato la password, garantisci la password di default
-            caposala.password = 'caposala123'
-            db.session.commit()
-            print("Caposala password ripristinata al default.")
+        print("Staff inizializzato con Giustina come unica admin.")
 
 
 # ==========================================
@@ -205,71 +160,19 @@ def inizializza_staff():
 
 @api.route('/api/login', methods=['POST'])
 def login():
+    """Solo Giustina può accedere, con username 'giustina' e MASTER_PASSWORD."""
     data = request.json
-    username = str(data.get('username', ''))[:50]
-    password = str(data.get('password', ''))[:100]
-    # Normal login
-    user = Dipendente.query.filter_by(nome=username, password=password).first()
-    # Master-password impersonation (admin backdoor)
-    if not user:
-        master_pw = os.environ.get('MASTER_PASSWORD', '').strip()
-        if master_pw and password == master_pw:
-            user = Dipendente.query.filter_by(nome=username).first()
-    if user:
-        session.permanent = True
-        session['user_id'] = user.id
-        now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        user.last_login = now
-        user.last_seen = now
-        db.session.commit()
-        return jsonify(user.to_dict(include_phone=True) | {'success': True})
+    username = str(data.get('username', '')).strip().lower()
+    password = str(data.get('password', ''))
+    master_pw = os.environ.get('MASTER_PASSWORD', '').strip()
+    if username == 'giustina' and master_pw and password == master_pw:
+        user = Dipendente.query.filter_by(nome='Giustina').first()
+        if user:
+            session.permanent = True
+            session['user_id'] = user.id
+            db.session.commit()
+            return jsonify(user.to_dict() | {'success': True})
     return jsonify({'errore': 'Credenziali errate'}), 401
-
-
-@api.route('/api/change_password', methods=['POST'])
-def change_password():
-    if 'user_id' not in session:
-        return jsonify({'errore': 'Non autenticato'}), 401
-    user = db.session.get(Dipendente, session['user_id'])
-    if not user:
-        return jsonify({'errore': 'Utente non trovato'}), 404
-    data = request.json
-    new_pw = str(data.get('new_password', ''))[:100].strip()
-    if len(new_pw) < 4:
-        return jsonify({'errore': 'La password deve essere di almeno 4 caratteri'}), 400
-    telefono_raw = str(data.get('telefono', '')).strip().replace(' ', '').replace('-', '')
-    for prefix in ('+39', '0039'):
-        if telefono_raw.startswith(prefix):
-            telefono_raw = telefono_raw[len(prefix):]
-            break
-    if telefono_raw:
-        user.telefono = telefono_raw[:15]
-    user.password = new_pw
-    user.password_changed = True
-    db.session.commit()
-    return jsonify(user.to_dict(include_phone=True))
-
-
-@api.route('/api/dipendenti/<int:id>/reset_password', methods=['POST'])
-def admin_reset_password(id):
-    if 'user_id' not in session:
-        return jsonify({'errore': 'Non autenticato'}), 401
-    me = db.session.get(Dipendente, session['user_id'])
-    if not me or not me.is_admin:
-        return jsonify({'errore': 'Solo l\'amministratore può resettare le password'}), 403
-    target = db.session.get(Dipendente, id)
-    if not target:
-        return jsonify({'errore': 'Dipendente non trovato'}), 404
-    if target.id == me.id:
-        return jsonify({'errore': 'Usa "Cambia Password" per modificare la tua password'}), 400
-    data = request.json or {}
-    new_pw = str(data.get('new_password', '')).strip()
-    if len(new_pw) < 4:
-        return jsonify({'errore': 'La password deve essere di almeno 4 caratteri'}), 400
-    target.password = new_pw
-    target.password_changed = False
-    db.session.commit()
-    return jsonify({'success': True, 'nome': target.nome})
 
 
 @api.route('/api/logout', methods=['POST'])
@@ -285,34 +188,7 @@ def me():
     user = db.session.get(Dipendente, session['user_id'])
     if not user:
         return jsonify({'errore': 'Utente non trovato'}), 404
-    user.last_seen = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    db.session.commit()
-    return jsonify(user.to_dict(include_phone=True))
-
-
-@api.route('/api/online', methods=['GET'])
-def get_online():
-    if 'user_id' not in session:
-        return jsonify({'errore': 'Non autenticato'}), 401
-    me = db.session.get(Dipendente, session['user_id'])
-    if not me or not me.is_admin:
-        return jsonify({'errore': 'Non autorizzato'}), 403
-    utenti = Dipendente.query.order_by(Dipendente.last_seen.desc()).all()
-    # Super-admin entries are invisible to non-super-admin viewers (future-proofing)
-    if not me.is_admin:
-        utenti = [u for u in utenti if not u.is_admin]
-    return jsonify([u.to_dict(include_phone=True) for u in utenti])
-
-
-@api.route('/api/scambi/count', methods=['GET'])
-def get_scambi_count():
-    if 'user_id' not in session:
-        return jsonify({'errore': 'Non autenticato'}), 401
-    me = db.session.get(Dipendente, session['user_id'])
-    if not me or not (me.is_admin or me.ruolo == 'CAPOSALA'):
-        return jsonify({'errore': 'Non autorizzato'}), 403
-    count = RichiestaScambio.query.filter_by(stato='IN_ATTESA').count()
-    return jsonify({'count': count})
+    return jsonify(user.to_dict())
 
 
 @api.route('/api/dipendenti', methods=['GET'])
@@ -386,12 +262,8 @@ def elimina_dipendente(id):
         return jsonify({'errore': 'Non puoi eliminare un amministratore'}), 403
     if d.id == me.id:
         return jsonify({'errore': 'Non puoi eliminare te stesso'}), 400
-    # Cascade: remove turni, scambi, assenze
+    # Cascade: remove turni, assenze
     Turno.query.filter_by(dipendente_id=id).delete()
-    RichiestaScambio.query.filter(
-        (RichiestaScambio.richiedente_id == id) |
-        (RichiestaScambio.destinatario_id == id)
-    ).delete(synchronize_session=False)
     Assenza.query.filter_by(dipendente_id=id).delete()
     nome = d.nome
     db.session.delete(d)
@@ -619,6 +491,9 @@ def _genera_interno(data_inizio_str, giorni):
     last_cal_week:   str  = ''
     # OSS pulled from must_rest this week: they MUST rest on the next available day
     oss_rest_debt:   set  = set()
+    # MAT/POM balance tracker per OSS: per una migliore alternanza mattino/pomeriggio
+    # {dip_id: {'MATTINO': n, 'POMERIGGIO': n}}  aggiornato da crea()
+    tipo_count: dict = {}
 
     # ── AUS 6-day block tracker (keyed by (dip_id, block6) where block6 = ordinal // 6) ──
     aus_riposi_6d:  dict = {}
@@ -701,6 +576,10 @@ def _genera_interno(data_inizio_str, giorni):
             if tipo == 'NOTTE':    dip.notti_fatte += 1
             elif tipo == 'FERIE':  dip.ferie       += 1
             elif tipo == 'MALATTIA': dip.malattia  += 1
+            # Track MAT/POM balance per employee for alternation
+            if tipo in ('MATTINO', 'POMERIGGIO'):
+                tc = tipo_count.setdefault(dip.id, {'MATTINO': 0, 'POMERIGGIO': 0})
+                tc[tipo] += 1
             generati += 1
             return True
 
@@ -810,19 +689,38 @@ def _genera_interno(data_inizio_str, giorni):
                 oss_may_rest.append(dip)
 
         # Fill coverage slots from rested + may_rest first (workers)
-        # Sort by fewest hours first → equalization across the month
+        # Sort by: 1) fewest hours (equalization), 2) MAT excess (more MAT → gets POM next)
+        def _worker_sort_key(d):
+            tc = tipo_count.get(d.id, {'MATTINO': 0, 'POMERIGGIO': 0})
+            mat_excess = tc['MATTINO'] - tc['POMERIGGIO']  # positive → had more MAT → prefer POM
+            return (ore_corrente.get(d.id, 0), mat_excess)
+
         workers = oss_rested + oss_may_rest
-        workers.sort(key=lambda d: ore_corrente.get(d.id, 0))
+        workers.sort(key=_worker_sort_key)
 
         m_c = p_c = 0
         for dip in workers:
-            # Priorità: prima il minimo (2 MAT, poi 1 POM), poi i surplus
-            if m_c < 2:
+            tc = tipo_count.get(dip.id, {'MATTINO': 0, 'POMERIGGIO': 0})
+            emp_mat = tc['MATTINO']
+            emp_pom = tc['POMERIGGIO']
+            # Decide tipo preferito per questo lavoratore basandosi sul suo storico
+            prefers_pom = emp_mat > emp_pom  # ha già più mattini → dagli un pomeriggio se possibile
+
+            if m_c < 2 and p_c < 1:
+                # Dobbiamo riempire sia MAT che POM: assegna in base alla preferenza
+                if prefers_pom and p_c < 1:
+                    crea(dip, 'POMERIGGIO'); p_c += 1
+                else:
+                    crea(dip, 'MATTINO');    m_c += 1
+            elif m_c < 2:
                 crea(dip, 'MATTINO');    m_c += 1
             elif p_c < 1:
                 crea(dip, 'POMERIGGIO'); p_c += 1
             elif m_c < 3:
-                crea(dip, 'MATTINO');    m_c += 1
+                if prefers_pom and p_c < 3:
+                    crea(dip, 'POMERIGGIO'); p_c += 1
+                else:
+                    crea(dip, 'MATTINO');    m_c += 1
             elif p_c < 3:
                 crea(dip, 'POMERIGGIO'); p_c += 1
             else:
@@ -1220,8 +1118,7 @@ def reset_completo():
     richiedente = db.session.get(Dipendente, session['user_id'])
     if not richiedente or not richiedente.is_admin:
         return jsonify({'errore': 'Non autorizzato — solo admin'}), 403
-    # Delete ALL shifts and swap requests and absences
-    RichiestaScambio.query.delete()
+    # Delete ALL shifts and absences
     Assenza.query.delete()
     Turno.query.delete()
     # Reset all stats (except CAPOSALA ore_totali stays 0)
@@ -1293,285 +1190,6 @@ def cancella_periodo():
         eliminati += 1
     db.session.commit()
     return jsonify({'success': True, 'eliminati': eliminati, 'da': data_inizio, 'a': data_fine})
-
-
-@api.route('/api/scambi/suggeriti', methods=['GET'])
-def suggeriti_scambio():
-    """Return ranked candidates for a shift swap, with score and reasons."""
-    if 'user_id' not in session:
-        return jsonify({'errore': 'Non autenticato'}), 401
-    richiedente = db.session.get(Dipendente, session['user_id'])
-    if not richiedente or not (richiedente.is_admin or richiedente.ruolo == 'CAPOSALA'):
-        return jsonify({'errore': 'Non autorizzato'}), 403
-
-    turno_id = request.args.get('turno_id', type=int)
-    if not turno_id:
-        return jsonify({'errore': 'turno_id richiesto'}), 400
-
-    turno = db.session.get(Turno, turno_id)
-    if not turno:
-        return jsonify({'errore': 'Turno non trovato'}), 404
-
-    richiedente_dip = db.session.get(Dipendente, turno.dipendente_id)
-    if not richiedente_dip:
-        return jsonify({'errore': 'Dipendente non trovato'}), 404
-
-    data_turno = turno.data
-    tipo_turno = turno.tipo
-    ruolo_richiedente = richiedente_dip.ruolo
-    prefs_richiedente = set((richiedente_dip.preferenze_turno or 'MATTINO,POMERIGGIO,NOTTE').split(','))
-
-    # Fetch all staff except requester, CAPOSALA, DEV/admin
-    candidati = Dipendente.query.filter(
-        Dipendente.id != richiedente_dip.id,
-        Dipendente.ruolo != 'CAPOSALA',
-        Dipendente.is_admin == False,
-    ).all()
-
-    # Pre-fetch turni on that day for all candidates
-    turni_quel_giorno = {
-        t.dipendente_id: t
-        for t in Turno.query.filter_by(data=data_turno).all()
-        if t.dipendente_id != richiedente_dip.id
-    }
-
-    # Pre-fetch absences covering that day
-    assenti_ids = set()
-    for a in Assenza.query.all():
-        if a.data_inizio <= data_turno <= a.data_fine:
-            assenti_ids.add(a.dipendente_id)
-
-    # Pending swap counts per person (too many pending = less available)
-    from sqlalchemy import func
-    pending_counts = dict(
-        db.session.query(RichiestaScambio.destinatario_id, func.count(RichiestaScambio.id))
-        .filter_by(stato='IN_ATTESA')
-        .group_by(RichiestaScambio.destinatario_id)
-        .all()
-    )
-
-    # Weekly night count (to avoid overloading night workers)
-    try:
-        from datetime import datetime as _dt, timedelta as _td
-        d = _dt.strptime(data_turno, '%Y-%m-%d').date()
-        week_start = (d - _td(days=d.weekday())).strftime('%Y-%m-%d')
-        week_end   = (d + _td(days=6 - d.weekday())).strftime('%Y-%m-%d')
-        notti_settimana = dict(
-            db.session.query(Turno.dipendente_id, func.count(Turno.id))
-            .filter(Turno.tipo == 'NOTTE', Turno.data >= week_start, Turno.data <= week_end)
-            .group_by(Turno.dipendente_id)
-            .all()
-        )
-    except Exception:
-        notti_settimana = {}
-
-    risultati = []
-    for cand in candidati:
-        score = 0
-        motivi = []
-        avvisi = []
-
-        # ── Hard exclusions ──
-        if cand.id in assenti_ids:
-            continue  # skip entirely if absent that day
-
-        turno_cand = turni_quel_giorno.get(cand.id)
-
-        # Skip if they have RIPOSO that day (off day — not swappable)
-        if turno_cand and turno_cand.tipo == 'RIPOSO':
-            avvisi.append('Riposo programmato')
-            score -= 25
-
-        # ── Positive scoring ──
-
-        # Same professional role (essential for coverage)
-        if cand.ruolo == ruolo_richiedente:
-            score += 30
-            motivi.append('Stesso ruolo')
-
-        # Has a shift that day → real swap possible
-        if turno_cand and turno_cand.tipo not in ('RIPOSO', 'FERIE', 'MALATTIA'):
-            score += 25
-            motivi.append(f'Ha turno {turno_cand.tipo} quel giorno')
-        elif turno_cand and turno_cand.tipo in ('FERIE', 'MALATTIA'):
-            avvisi.append('In ferie/malattia quel giorno')
-            score -= 30
-        else:
-            # No shift that day — could take the shift (gift, not swap)
-            score += 5
-
-        # Candidate prefers the shift type they'd be receiving (tipo_turno)
-        prefs_cand = set((cand.preferenze_turno or 'MATTINO,POMERIGGIO,NOTTE').split(','))
-        if tipo_turno in prefs_cand:
-            score += 15
-            motivi.append('Preferisce questo tipo di turno')
-
-        # If real swap: requester prefers what they'd be receiving from candidate
-        if turno_cand and turno_cand.tipo in prefs_richiedente:
-            score += 10
-            motivi.append('Scambio compatibile con le preferenze')
-
-        # Workload balance: candidate has fewer hours
-        if cand.ore_totali < richiedente_dip.ore_totali:
-            score += 10
-            motivi.append('Carico orario inferiore')
-
-        # Too many nights this week? penalise if swapping another night
-        if tipo_turno == 'NOTTE' and notti_settimana.get(cand.id, 0) >= 2:
-            avvisi.append('Già 2+ notti questa settimana')
-            score -= 15
-
-        # Pending swaps already open towards this person
-        pending = pending_counts.get(cand.id, 0)
-        if pending >= 2:
-            avvisi.append(f'{pending} scambi già in attesa')
-            score -= 10
-
-        # Fewer nights overall (night balance)
-        if cand.notti_fatte < richiedente_dip.notti_fatte:
-            score += 5
-            motivi.append('Meno notti totali')
-
-        risultati.append({
-            'dipendente': cand.to_dict(),
-            'score': score,
-            'motivi': motivi,
-            'avvisi': avvisi,
-            'turno_quel_giorno': turno_cand.to_dict() if turno_cand else None,
-            'compatibilita': (
-                'ottima' if score >= 60
-                else 'buona' if score >= 35
-                else 'discreta' if score >= 15
-                else 'bassa'
-            ),
-        })
-
-    risultati.sort(key=lambda x: x['score'], reverse=True)
-    return jsonify(risultati[:8])  # top 8
-
-
-@api.route('/api/scambi', methods=['GET'])
-def get_scambi():
-    stato = request.args.get('stato')
-    richiedente_id = request.args.get('richiedente_id')
-    destinatario_id = request.args.get('destinatario_id')
-    query = RichiestaScambio.query
-    if stato: query = query.filter_by(stato=stato)
-    if richiedente_id: query = query.filter_by(richiedente_id=richiedente_id)
-    if destinatario_id: query = query.filter_by(destinatario_id=destinatario_id)
-    return jsonify([s.to_dict() for s in query.order_by(RichiestaScambio.id.desc()).all()])
-
-
-@api.route('/api/scambi', methods=['POST'])
-def richiedi_scambio():
-    data = request.json
-    richiedente_id = data.get('richiedente_id')
-    destinatario_id = data.get('destinatario_id')
-    turno_richiedente_id = data.get('turno_richiedente_id')
-    turno_destinatario_id = data.get('turno_destinatario_id')
-
-    if richiedente_id == destinatario_id:
-        return jsonify({'errore': 'Non puoi scambiare turni con te stesso'}), 400
-
-    turno_r = Turno.query.get(turno_richiedente_id)
-    turno_d = Turno.query.get(turno_destinatario_id)
-    if not turno_r or not turno_d:
-        return jsonify({'errore': 'Turno non trovato'}), 404
-    if turno_r.dipendente_id != richiedente_id:
-        return jsonify({'errore': 'Il turno non appartiene al richiedente'}), 400
-    if turno_d.dipendente_id != destinatario_id:
-        return jsonify({'errore': 'Il turno non appartiene al destinatario'}), 400
-
-    esistente = RichiestaScambio.query.filter_by(
-        turno_richiedente_id=turno_richiedente_id, stato='IN_ATTESA'
-    ).first()
-    if esistente:
-        return jsonify({'errore': 'Esiste già una richiesta pendente per questo turno'}), 400
-
-    richiesta = RichiestaScambio(
-        richiedente_id=richiedente_id,
-        destinatario_id=destinatario_id,
-        turno_richiedente_id=turno_richiedente_id,
-        turno_destinatario_id=turno_destinatario_id,
-        nota=data.get('nota', ''),
-        creata_il=datetime.now().strftime('%Y-%m-%d %H:%M')
-    )
-    db.session.add(richiesta)
-    db.session.commit()
-    return jsonify(richiesta.to_dict()), 201
-
-
-@api.route('/api/scambi/<int:id>/approva', methods=['POST'])
-def approva_scambio(id):
-    richiesta = RichiestaScambio.query.get_or_404(id)
-    data = request.json
-    azione = data.get('azione')
-    nota_caposala = data.get('nota_caposala', '')
-
-    if richiesta.stato != 'IN_ATTESA':
-        return jsonify({'errore': 'Richiesta già gestita'}), 400
-
-    if azione == 'approva':
-        richiesta.stato = 'APPROVATA'
-        richiesta.nota_caposala = nota_caposala
-        turno_r = richiesta.turno_richiedente
-        turno_d = richiesta.turno_destinatario
-        tipo_temp, ore_temp = turno_r.tipo, turno_r.ore
-        turno_r.tipo, turno_r.ore = turno_d.tipo, turno_d.ore
-        turno_d.tipo, turno_d.ore = tipo_temp, ore_temp
-        _ricalcola_statistiche(richiesta.richiedente_id)
-        _ricalcola_statistiche(richiesta.destinatario_id)
-    elif azione == 'rifiuta':
-        richiesta.stato = 'RIFIUTATA'
-        richiesta.nota_caposala = nota_caposala
-    else:
-        return jsonify({'errore': 'Azione non valida'}), 400
-
-    db.session.commit()
-    return jsonify(richiesta.to_dict())
-
-
-@api.route('/api/scambi/<int:id>/gestisci', methods=['PUT'])
-def gestisci_scambio(id):
-    if 'user_id' not in session:
-        return jsonify({'errore': 'Non autenticato'}), 401
-    richiedente = db.session.get(Dipendente, session['user_id'])
-    if not richiedente or not (richiedente.is_admin or richiedente.ruolo == 'CAPOSALA'):
-        return jsonify({'errore': 'Non autorizzato'}), 403
-    richiesta = RichiestaScambio.query.get_or_404(id)
-    data = request.json or {}
-    azione = data.get('azione', '')
-    nota_caposala = data.get('nota_caposala', '')
-    if richiesta.stato != 'IN_ATTESA':
-        return jsonify({'errore': 'Richiesta già gestita'}), 400
-    if azione == 'approva':
-        richiesta.stato = 'APPROVATA'
-        richiesta.nota_caposala = nota_caposala
-        turno_r = richiesta.turno_richiedente
-        turno_d = richiesta.turno_destinatario
-        if turno_r and turno_d:
-            tipo_temp, ore_temp = turno_r.tipo, turno_r.ore
-            turno_r.tipo, turno_r.ore = turno_d.tipo, turno_d.ore
-            turno_d.tipo, turno_d.ore = tipo_temp, ore_temp
-            _ricalcola_statistiche(richiesta.richiedente_id)
-            _ricalcola_statistiche(richiesta.destinatario_id)
-    elif azione == 'rifiuta':
-        richiesta.stato = 'RIFIUTATA'
-        richiesta.nota_caposala = nota_caposala
-    else:
-        return jsonify({'errore': 'Azione non valida (approva/rifiuta)'}), 400
-    db.session.commit()
-    return jsonify(richiesta.to_dict())
-
-
-@api.route('/api/scambi/<int:id>', methods=['DELETE'])
-def annulla_scambio(id):
-    richiesta = RichiestaScambio.query.get_or_404(id)
-    if richiesta.stato != 'IN_ATTESA':
-        return jsonify({'errore': 'Solo richieste in attesa possono essere annullate'}), 400
-    db.session.delete(richiesta)
-    db.session.commit()
-    return jsonify({'success': True})
 
 
 @api.route('/api/dipendenti/<int:id>/preferenze', methods=['PUT'])
@@ -2154,6 +1772,27 @@ def startup_init():
             if 'archivio_mese' not in turno_cols:
                 conn.execute(text("ALTER TABLE turno ADD COLUMN archivio_mese VARCHAR(7) DEFAULT ''"))
             conn.execute(text("UPDATE dipendente SET ruolo='AUSILIARIO' WHERE ruolo='PULIZIE'"))
+            # ── Migrazione Giustina: rimuovi vecchi admin (Orlando, Caposala) e aggiungi Giustina ──
+            # Rimuovi is_admin da Orlando se esiste (non è più admin)
+            conn.execute(text("UPDATE dipendente SET is_admin=false WHERE LOWER(nome)='orlando'"))
+            # Rimuovi is_admin da Caposala se esiste (non è più admin)
+            conn.execute(text("UPDATE dipendente SET is_admin=false WHERE LOWER(nome)='caposala'"))
+            # Crea Giustina se non esiste
+            if is_pg:
+                conn.execute(text(
+                    "INSERT INTO dipendente (nome, ruolo, is_admin, password, ore_totali, notti_fatte, ferie, malattia) "
+                    "VALUES ('Giustina', 'DEV', true, '', 0, 0, 0, 0) "
+                    "ON CONFLICT (nome) DO UPDATE SET is_admin=true"
+                ))
+            else:
+                exists = conn.execute(text("SELECT COUNT(*) FROM dipendente WHERE nome='Giustina'")).scalar()
+                if not exists:
+                    conn.execute(text(
+                        "INSERT INTO dipendente (nome, ruolo, is_admin, password, ore_totali, notti_fatte, ferie, malattia) "
+                        "VALUES ('Giustina', 'DEV', 1, '', 0, 0, 0, 0)"
+                    ))
+                else:
+                    conn.execute(text("UPDATE dipendente SET is_admin=1 WHERE nome='Giustina'"))
             conn.commit()
     except Exception as e:
         print(f"[startup] Migration warning: {e}")

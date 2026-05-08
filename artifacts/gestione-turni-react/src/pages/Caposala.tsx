@@ -1,20 +1,17 @@
 import { useEffect, useState } from "react";
-import { Dipendente, RichiestaScambio } from "@/lib/api";
+import { Dipendente } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
-import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { RoleBadge } from "@/components/ui/RoleBadge";
-import { ShiftBadge } from "@/components/ui/ShiftBadge";
-import { Badge } from "@/components/ui/badge";
 import {
   Check, CalendarRange, Calendar, ShieldAlert,
-  UserPlus, Pencil, KeyRound, Phone, Users, Copy, Trash2,
-  Sun, Sunset, BedDouble, ArrowLeftRight, X, Clock,
+  UserPlus, Pencil, Phone, Users, Copy, Trash2,
+  Sun, Sunset, BedDouble,
 } from "lucide-react";
 
 type Pref = "MATTINO" | "POMERIGGIO" | "NOTTE";
@@ -38,10 +35,6 @@ export default function Caposala() {
   const { toast } = useToast();
 
   const [genLoading, setGenLoading] = useState<"settimana" | "mese" | null>(null);
-  const [scambiCount, setScambiCount] = useState(0);
-  const [scambiPendenti, setScambiPendenti] = useState<RichiestaScambio[]>([]);
-  const [gestioneLoading, setGestioneLoading] = useState<number | null>(null);
-  const [notaScambio, setNotaScambio] = useState<{ id: number; nota: string } | null>(null);
 
   // Staff management state
   const [dipendenti, setDipendenti] = useState<Dipendente[]>([]);
@@ -62,50 +55,8 @@ export default function Caposala() {
       .then((r) => (r.ok ? r.json() : []))
       .then(setDipendenti);
 
-  const fetchScambiCount = () =>
-    fetch("/flask-api/api/scambi/count", { credentials: "include" })
-      .then((r) => r.ok ? r.json() : { count: 0 })
-      .then((d) => setScambiCount(d.count ?? 0))
-      .catch(() => {});
-
-  const fetchScambiPendenti = () =>
-    fetch("/flask-api/api/scambi?stato=IN_ATTESA", { credentials: "include" })
-      .then((r) => r.ok ? r.json() : [])
-      .then((d: RichiestaScambio[]) => setScambiPendenti(d))
-      .catch(() => {});
-
-  const handleGestisci = async (id: number, azione: "approva" | "rifiuta", nota?: string) => {
-    setGestioneLoading(id);
-    try {
-      const res = await fetch(`/flask-api/api/scambi/${id}/gestisci`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({ azione, nota_caposala: nota || "" }),
-      });
-      if (res.ok) {
-        toast({
-          title: azione === "approva" ? "Scambio approvato ✓" : "Scambio rifiutato",
-          description: azione === "approva" ? "I turni sono stati scambiati." : "La richiesta è stata rifiutata.",
-        });
-        setNotaScambio(null);
-        fetchScambiPendenti();
-        fetchScambiCount();
-      } else {
-        const err = await res.json();
-        toast({ title: err.errore || "Errore", variant: "destructive" });
-      }
-    } finally {
-      setGestioneLoading(null);
-    }
-  };
-
   useEffect(() => {
     fetchDipendenti();
-    fetchScambiCount();
-    fetchScambiPendenti();
-    const interval = setInterval(() => { fetchScambiCount(); fetchScambiPendenti(); }, 15_000);
-    return () => clearInterval(interval);
   }, []);
 
   // ─── Generation ───
@@ -225,7 +176,7 @@ export default function Caposala() {
       if (res.ok) {
         toast({
           title: `${deleteTarget.nome} rimosso`,
-          description: "Tutti i turni e le richieste associate sono stati eliminati.",
+          description: "Tutti i turni e le assenze associate sono stati eliminati.",
         });
         setDeleteTarget(null);
         fetchDipendenti();
@@ -235,22 +186,6 @@ export default function Caposala() {
       }
     } finally {
       setDeleteLoading(false);
-    }
-  };
-
-  // ─── Reset password ───
-  const handleResetPw = async (d: Dipendente) => {
-    const res = await fetch(`/flask-api/api/dipendenti/${d.id}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      credentials: "include",
-      body: JSON.stringify({ password: "password123", password_changed: false }),
-    });
-    if (res.ok) {
-      toast({ title: `Password di ${d.nome} reimpostata a "password123"` });
-      fetchDipendenti();
-    } else {
-      toast({ title: "Errore reset password", variant: "destructive" });
     }
   };
 
@@ -266,128 +201,24 @@ export default function Caposala() {
     );
   }
 
-  // Staff list: exclude DEV/Orlando from editable list for caposala (admin can see all)
   const staffVisibile = dipendenti.filter((d) => user?.is_admin ? true : !d.is_admin);
 
   return (
     <div className="min-h-screen">
       {/* Header */}
       <div className="bg-yellow-950/40 border-b border-yellow-800/40 px-6 md:px-10 py-8">
-        <div className="max-w-5xl mx-auto flex items-center justify-between gap-5">
-          <div className="flex items-center gap-5">
-            <div className="h-14 w-14 rounded-2xl bg-yellow-900/60 text-yellow-400 flex items-center justify-center shadow-sm">
-              <ShieldAlert className="h-7 w-7" />
-            </div>
-            <div>
-              <h1 className="text-2xl font-bold text-foreground">Area Caposala</h1>
-              <p className="text-sm text-yellow-400 font-medium mt-0.5">Gestione turni e staff</p>
-            </div>
+        <div className="max-w-5xl mx-auto flex items-center gap-5">
+          <div className="h-14 w-14 rounded-2xl bg-yellow-900/60 text-yellow-400 flex items-center justify-center shadow-sm">
+            <ShieldAlert className="h-7 w-7" />
           </div>
-
-          {/* Badge notifiche scambi in attesa */}
-          <div className="flex items-center gap-2 px-4 py-2.5 rounded-2xl bg-white/5 border border-white/10">
-            <div className="relative">
-              <ArrowLeftRight className="h-5 w-5 text-muted-foreground" />
-              {scambiCount > 0 && (
-                <span className="absolute -top-2 -right-2 h-4 w-4 rounded-full bg-amber-500 text-[9px] font-black text-slate-900 flex items-center justify-center leading-none">
-                  {scambiCount > 9 ? "9+" : scambiCount}
-                </span>
-              )}
-            </div>
-            <div>
-              <p className="text-xs font-bold text-foreground leading-tight">
-                {scambiCount === 0 ? "Nessun scambio" : `${scambiCount} scamb${scambiCount === 1 ? "io" : "i"}`}
-              </p>
-              <p className="text-[10px] text-muted-foreground leading-tight">in attesa</p>
-            </div>
+          <div>
+            <h1 className="text-2xl font-bold text-foreground">Area Gestione</h1>
+            <p className="text-sm text-yellow-400 font-medium mt-0.5">Gestione turni e staff</p>
           </div>
         </div>
       </div>
 
       <div className="p-6 md:p-10 max-w-5xl mx-auto space-y-10">
-
-        {/* ─── Richieste Scambio Pendenti ─── */}
-        {scambiPendenti.length > 0 && (
-          <section>
-            <div className="flex items-center gap-2 mb-4">
-              <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-widest">Richieste di Scambio in Attesa</h2>
-              <span className="text-sm font-bold text-slate-900 bg-amber-400 px-2.5 py-0.5 rounded-full animate-pulse">
-                {scambiPendenti.length}
-              </span>
-            </div>
-            <div className="space-y-3">
-              {scambiPendenti.map((s) => (
-                <div
-                  key={s.id}
-                  className="rounded-2xl border border-amber-500/20 bg-amber-500/5 p-4 space-y-3"
-                >
-                  <div className="flex items-start justify-between gap-3 flex-wrap">
-                    <div className="space-y-1.5">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="font-bold text-foreground">{s.richiedente_nome}</span>
-                        <ArrowLeftRight className="h-3.5 w-3.5 text-amber-400" />
-                        <span className="font-bold text-foreground">{s.destinatario_nome}</span>
-                        {s.destinatario_ruolo && <RoleBadge role={s.destinatario_ruolo} />}
-                      </div>
-                      <div className="flex items-center gap-3 text-sm text-muted-foreground flex-wrap">
-                        {s.turno_richiedente && (
-                          <span className="flex items-center gap-1.5">
-                            <span className="text-xs text-muted-foreground/60">Cede:</span>
-                            <ShiftBadge type={s.turno_richiedente.tipo} />
-                            <span className="font-mono text-xs">{s.turno_richiedente.data}</span>
-                          </span>
-                        )}
-                        {s.turno_destinatario && (
-                          <span className="flex items-center gap-1.5">
-                            <ArrowLeftRight className="h-3 w-3 text-muted-foreground/40" />
-                            <ShiftBadge type={s.turno_destinatario.tipo} />
-                            <span className="font-mono text-xs">{s.turno_destinatario.data}</span>
-                          </span>
-                        )}
-                      </div>
-                      {s.nota && (
-                        <p className="text-xs text-muted-foreground italic">"{s.nota}"</p>
-                      )}
-                      <div className="flex items-center gap-1 text-[10px] text-muted-foreground/50">
-                        <Clock className="h-3 w-3" />
-                        {new Date(s.creata_il).toLocaleDateString("it-IT")}
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2 shrink-0">
-                      <button
-                        onClick={() => setNotaScambio({ id: s.id, nota: "" })}
-                        disabled={gestioneLoading === s.id}
-                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border border-red-500/30 text-red-400 bg-red-500/8 hover:bg-red-500/15 transition-colors disabled:opacity-50"
-                      >
-                        <X className="h-3.5 w-3.5" />
-                        Rifiuta
-                      </button>
-                      <button
-                        onClick={() => handleGestisci(s.id, "approva")}
-                        disabled={gestioneLoading === s.id}
-                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold glow-gold"
-                        style={{ background: CRYSTAL, color: "#0f172a" }}
-                      >
-                        <Check className="h-3.5 w-3.5" />
-                        {gestioneLoading === s.id ? "..." : "Approva"}
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </section>
-        )}
-
-        {scambiPendenti.length === 0 && (
-          <section>
-            <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-widest mb-3">Richieste di Scambio</h2>
-            <div className="rounded-2xl border border-white/8 bg-white/3 p-6 text-center">
-              <ArrowLeftRight className="h-6 w-6 text-muted-foreground/20 mx-auto mb-2" />
-              <p className="text-sm text-muted-foreground">Nessuna richiesta in attesa</p>
-            </div>
-          </section>
-        )}
 
         {/* ─── Auto-generate ─── */}
         <section>
@@ -479,39 +310,22 @@ export default function Caposala() {
                         </span>
                       )}
                     </div>
-                    <div className="flex items-center gap-3 mt-0.5">
-                      {d.telefono ? (
-                        <span className="text-xs text-muted-foreground/60 flex items-center gap-1">
-                          <Phone className="h-3 w-3" />
-                          +39 {d.telefono}
-                        </span>
-                      ) : (
-                        <span className="text-xs text-muted-foreground/30">Nessun telefono</span>
-                      )}
-                      {!d.password_changed && (
-                        <span className="text-[9px] text-orange-400/80 bg-orange-500/10 border border-orange-500/20 px-1.5 py-0.5 rounded uppercase tracking-wide font-bold">
-                          Primo accesso
-                        </span>
-                      )}
-                    </div>
+                    {d.telefono && (
+                      <span className="text-xs text-muted-foreground/60 flex items-center gap-1 mt-0.5">
+                        <Phone className="h-3 w-3" />
+                        +39 {d.telefono}
+                      </span>
+                    )}
                   </div>
 
                   <div className="flex items-center gap-1.5 shrink-0">
                     <button
-                      title="Modifica ruolo"
+                      title="Modifica ruolo e preferenze"
                       onClick={() => openEdit(d)}
                       className="h-8 w-8 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors"
                       data-testid={`edit-${d.id}`}
                     >
                       <Pencil className="h-3.5 w-3.5" />
-                    </button>
-                    <button
-                      title="Reset password a password123"
-                      onClick={() => handleResetPw(d)}
-                      className="h-8 w-8 rounded-lg bg-white/5 hover:bg-amber-500/15 border border-white/10 hover:border-amber-500/30 flex items-center justify-center text-muted-foreground hover:text-amber-400 transition-colors"
-                      data-testid={`reset-pw-${d.id}`}
-                    >
-                      <KeyRound className="h-3.5 w-3.5" />
                     </button>
                     {!d.is_admin && (
                       <button
@@ -551,9 +365,6 @@ export default function Caposala() {
                 className="bg-black/20 border-white/10 focus:border-amber-400"
                 data-testid="nuovo-nome"
               />
-              <p className="text-[10px] text-muted-foreground/50">
-                Il nome diventa anche lo <strong className="text-muted-foreground/70">username</strong> di accesso
-              </p>
             </div>
             <div className="space-y-1.5">
               <Label className="text-muted-foreground text-xs">Ruolo <span className="text-amber-400">*</span></Label>
@@ -567,20 +378,6 @@ export default function Caposala() {
                   ))}
                 </SelectContent>
               </Select>
-            </div>
-
-            {/* Credential preview */}
-            <div className="rounded-xl bg-amber-500/8 border border-amber-500/20 p-3 space-y-1">
-              <p className="text-[10px] text-amber-400/70 font-semibold uppercase tracking-wide">Credenziali di accesso iniziali</p>
-              <div className="flex justify-between text-xs">
-                <span className="text-muted-foreground">Username:</span>
-                <span className="font-mono text-foreground">{nuovoNome.trim() || "—"}</span>
-              </div>
-              <div className="flex justify-between text-xs">
-                <span className="text-muted-foreground">Password:</span>
-                <span className="font-mono text-amber-300">password123</span>
-              </div>
-              <p className="text-[10px] text-muted-foreground/50 mt-1">Al primo accesso verrà richiesto di cambiarla</p>
             </div>
 
             <div className="flex gap-3">
@@ -601,7 +398,7 @@ export default function Caposala() {
         </DialogContent>
       </Dialog>
 
-      {/* ─── Created credentials dialog ─── */}
+      {/* ─── Created confirmation dialog ─── */}
       <Dialog open={!!createdCreds} onOpenChange={(open) => !open && setCreatedCreds(null)}>
         <DialogContent className="glass-strong border-white/10 max-w-sm">
           <DialogHeader>
@@ -619,11 +416,11 @@ export default function Caposala() {
 
               <div className="rounded-xl bg-white/5 border border-white/10 overflow-hidden">
                 <div className="px-4 py-2 border-b border-white/10 bg-white/3">
-                  <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Credenziali di accesso</p>
+                  <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Riferimento interno</p>
                 </div>
                 <div className="p-4 space-y-3">
                   <div className="flex items-center justify-between gap-2">
-                    <span className="text-xs text-muted-foreground">Username</span>
+                    <span className="text-xs text-muted-foreground">Nome</span>
                     <div className="flex items-center gap-2">
                       <span className="font-mono text-sm text-foreground">{createdCreds.nome}</span>
                       <button
@@ -635,23 +432,11 @@ export default function Caposala() {
                     </div>
                   </div>
                   <div className="flex items-center justify-between gap-2">
-                    <span className="text-xs text-muted-foreground">Password</span>
-                    <div className="flex items-center gap-2">
-                      <span className="font-mono text-sm text-amber-300">password123</span>
-                      <button
-                        onClick={() => { navigator.clipboard.writeText("password123"); toast({ title: "Copiato!" }); }}
-                        className="text-muted-foreground/50 hover:text-muted-foreground"
-                      >
-                        <Copy className="h-3.5 w-3.5" />
-                      </button>
-                    </div>
+                    <span className="text-xs text-muted-foreground">Ruolo</span>
+                    <span className="font-mono text-sm text-foreground">{createdCreds.ruolo}</span>
                   </div>
                 </div>
               </div>
-
-              <p className="text-xs text-muted-foreground/60">
-                Al primo accesso il sistema chiederà di impostare una password personale e il numero di cellulare.
-              </p>
 
               <Button className="w-full bg-emerald-600 hover:bg-emerald-500 text-white" onClick={() => setCreatedCreds(null)}>
                 Perfetto
@@ -681,9 +466,7 @@ export default function Caposala() {
                 </p>
                 <ul className="text-xs text-muted-foreground space-y-0.5 ml-3">
                   <li>• Tutti i turni assegnati</li>
-                  <li>• Tutte le richieste di scambio</li>
                   <li>• Tutte le assenze registrate</li>
-                  <li>• L'accesso all'app</li>
                 </ul>
               </div>
               <div className="flex gap-3">
@@ -703,44 +486,6 @@ export default function Caposala() {
                 >
                   <Trash2 className="h-4 w-4" />
                   {deleteLoading ? "Eliminazione..." : "Elimina"}
-                </Button>
-              </div>
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
-
-      {/* ─── Rifiuta scambio dialog ─── */}
-      <Dialog open={!!notaScambio} onOpenChange={(open) => !open && setNotaScambio(null)}>
-        <DialogContent className="glass-strong border-white/10 max-w-sm">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-red-400">
-              <X className="h-5 w-5" />
-              Rifiuta Richiesta
-            </DialogTitle>
-          </DialogHeader>
-          {notaScambio && (
-            <div className="space-y-4">
-              <p className="text-sm text-muted-foreground">Aggiungi una nota opzionale per il richiedente.</p>
-              <Textarea
-                value={notaScambio.nota}
-                onChange={(e) => setNotaScambio({ ...notaScambio, nota: e.target.value })}
-                placeholder="Motivo del rifiuto (opzionale)..."
-                className="border-white/10 bg-white/5 resize-none"
-                rows={3}
-              />
-              <div className="flex gap-3">
-                <Button variant="outline" className="flex-1 border-white/10 hover:bg-white/5"
-                  onClick={() => setNotaScambio(null)}>
-                  Annulla
-                </Button>
-                <Button
-                  className="flex-1 bg-red-600 hover:bg-red-500 text-white gap-2"
-                  onClick={() => handleGestisci(notaScambio.id, "rifiuta", notaScambio.nota)}
-                  disabled={gestioneLoading === notaScambio.id}
-                >
-                  <X className="h-4 w-4" />
-                  {gestioneLoading === notaScambio.id ? "..." : "Rifiuta"}
                 </Button>
               </div>
             </div>

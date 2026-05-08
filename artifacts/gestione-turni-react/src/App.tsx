@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { Switch, Route, Router as WouterRouter, useLocation } from "wouter";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
@@ -9,134 +9,14 @@ import Login from "@/pages/Login";
 import Dashboard from "@/pages/Dashboard";
 import Turni from "@/pages/Turni";
 import Genera from "@/pages/Genera";
-import Scambi from "@/pages/Scambi";
 import Caposala from "@/pages/Caposala";
-import Monitor from "@/pages/Monitor";
 import Griglia from "@/pages/Griglia";
 import Archivio from "@/pages/Archivio";
 import { AppLayout } from "@/components/layout/AppLayout";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { useToast } from "@/hooks/use-toast";
-import { KeyRound, ShieldCheck, Phone } from "lucide-react";
 
 const queryClient = new QueryClient();
-const CRYSTAL = "linear-gradient(155deg, #B8860B 0%, #FFBF00 38%, #FFE566 52%, #FFBF00 75%, #B8860B 100%)";
 
-/* ── First-login password + phone modal ── */
-function PasswordChangeModal() {
-  const { user, updateUser } = useAuth();
-  const { toast } = useToast();
-  const [pw, setPw] = useState("");
-  const [pw2, setPw2] = useState("");
-  const [telefono, setTelefono] = useState("");
-  const [loading, setLoading] = useState(false);
-
-  if (!user || user.password_changed) return null;
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (pw.length < 4) {
-      toast({ title: "Minimo 4 caratteri per la password", variant: "destructive" }); return;
-    }
-    if (pw !== pw2) {
-      toast({ title: "Le password non coincidono", variant: "destructive" }); return;
-    }
-    const tel = telefono.replace(/\D/g, "").replace(/^(39|0039)/, "");
-    if (tel.length < 9) {
-      toast({ title: "Numero di cellulare non valido (min. 9 cifre)", variant: "destructive" }); return;
-    }
-    setLoading(true);
-    try {
-      const res = await fetch("/flask-api/api/change_password", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({ new_password: pw, telefono: tel }),
-      });
-      if (res.ok) {
-        const updated = await res.json();
-        updateUser(updated);
-        toast({ title: "Profilo aggiornato con successo" });
-      } else {
-        const err = await res.json();
-        toast({ title: err.errore || "Errore", variant: "destructive" });
-      }
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
-      <div className="glass-strong rounded-3xl p-10 w-full max-w-sm text-center shadow-2xl border border-white/10">
-        <div className="mb-6 inline-flex items-center justify-center h-14 w-14 rounded-2xl bg-amber-500/15 text-amber-400 mx-auto">
-          <KeyRound className="h-7 w-7" />
-        </div>
-        <h2 className="text-xl font-bold text-foreground mb-1">Configura il tuo Profilo</h2>
-        <p className="text-sm text-muted-foreground mb-6">
-          Benvenuto/a <strong className="text-foreground">{user.nome}</strong>! Scegli una password e inserisci il tuo cellulare per le notifiche scambio turno.
-        </p>
-        <form onSubmit={handleSubmit} className="space-y-3 text-left">
-          <div className="space-y-1.5">
-            <Label className="text-muted-foreground text-xs">Nuova password</Label>
-            <Input
-              type="password"
-              value={pw}
-              onChange={(e) => setPw(e.target.value)}
-              placeholder="Minimo 4 caratteri"
-              required
-              minLength={4}
-              className="bg-black/20 border-white/10 focus:border-amber-400"
-            />
-          </div>
-          <div className="space-y-1.5">
-            <Label className="text-muted-foreground text-xs">Conferma password</Label>
-            <Input
-              type="password"
-              value={pw2}
-              onChange={(e) => setPw2(e.target.value)}
-              placeholder="Ripeti la password"
-              required
-              className="bg-black/20 border-white/10 focus:border-amber-400"
-            />
-          </div>
-          <div className="space-y-1.5">
-            <Label className="text-muted-foreground text-xs flex items-center gap-1.5">
-              <Phone className="h-3 w-3" />
-              Numero di cellulare
-            </Label>
-            <div className="flex gap-2 items-center">
-              <span className="text-sm text-muted-foreground bg-black/20 border border-white/10 rounded-lg px-3 h-9 flex items-center shrink-0">
-                +39
-              </span>
-              <Input
-                type="tel"
-                value={telefono}
-                onChange={(e) => setTelefono(e.target.value)}
-                placeholder="3331234567"
-                required
-                className="bg-black/20 border-white/10 focus:border-amber-400 flex-1"
-              />
-            </div>
-            <p className="text-[10px] text-muted-foreground/60">Usato solo dalla Caposala per notifiche scambio turno</p>
-          </div>
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full mt-2 py-3 rounded-xl font-bold text-sm uppercase tracking-widest glow-gold disabled:opacity-50 flex items-center justify-center gap-2"
-            style={{ background: CRYSTAL, color: "#0f172a" }}
-          >
-            <ShieldCheck className="h-4 w-4" />
-            {loading ? "Salvataggio..." : "Salva e Continua"}
-          </button>
-        </form>
-      </div>
-    </div>
-  );
-}
-
-function ProtectedRoute({ component: Component, adminOnly = false }: { component: React.ComponentType; adminOnly?: boolean }) {
+function ProtectedRoute({ component: Component }: { component: React.ComponentType }) {
   const { user, isLoading } = useAuth();
   const [, setLocation] = useLocation();
 
@@ -150,15 +30,9 @@ function ProtectedRoute({ component: Component, adminOnly = false }: { component
     </div>
   );
   if (!user) return null;
-  if (adminOnly && !user.is_admin) return (
-    <AppLayout>
-      <div className="p-10 text-center text-muted-foreground">Accesso riservato all'amministratore.</div>
-    </AppLayout>
-  );
 
   return (
     <AppLayout>
-      <PasswordChangeModal />
       <Component />
     </AppLayout>
   );
@@ -171,12 +45,10 @@ function Router() {
       <Route path="/" component={() => <ProtectedRoute component={Dashboard} />} />
       <Route path="/dashboard" component={() => <ProtectedRoute component={Dashboard} />} />
       <Route path="/turni" component={() => <ProtectedRoute component={Turni} />} />
-      <Route path="/scambi" component={() => <ProtectedRoute component={Scambi} />} />
       <Route path="/genera" component={() => <ProtectedRoute component={Genera} />} />
       <Route path="/caposala" component={() => <ProtectedRoute component={Caposala} />} />
       <Route path="/griglia" component={() => <ProtectedRoute component={Griglia} />} />
       <Route path="/archivio" component={() => <ProtectedRoute component={Archivio} />} />
-      <Route path="/monitor" component={() => <ProtectedRoute component={Monitor} adminOnly />} />
       <Route component={NotFound} />
     </Switch>
   );
