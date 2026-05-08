@@ -229,8 +229,8 @@ def change_password():
         return jsonify({'errore': 'Utente non trovato'}), 404
     data = request.json
     new_pw = str(data.get('new_password', ''))[:100].strip()
-    if len(new_pw) < 6:
-        return jsonify({'errore': 'La password deve essere di almeno 6 caratteri'}), 400
+    if len(new_pw) < 4:
+        return jsonify({'errore': 'La password deve essere di almeno 4 caratteri'}), 400
     telefono_raw = str(data.get('telefono', '')).strip().replace(' ', '').replace('-', '')
     for prefix in ('+39', '0039'):
         if telefono_raw.startswith(prefix):
@@ -258,8 +258,8 @@ def admin_reset_password(id):
         return jsonify({'errore': 'Usa "Cambia Password" per modificare la tua password'}), 400
     data = request.json or {}
     new_pw = str(data.get('new_password', '')).strip()
-    if len(new_pw) < 6:
-        return jsonify({'errore': 'La password deve essere di almeno 6 caratteri'}), 400
+    if len(new_pw) < 4:
+        return jsonify({'errore': 'La password deve essere di almeno 4 caratteri'}), 400
     target.password = new_pw
     target.password_changed = False
     db.session.commit()

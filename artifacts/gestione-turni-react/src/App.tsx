@@ -36,8 +36,8 @@ function PasswordChangeModal() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (pw.length < 6) {
-      toast({ title: "Minimo 6 caratteri per la password", variant: "destructive" }); return;
+    if (pw.length < 4) {
+      toast({ title: "Minimo 4 caratteri per la password", variant: "destructive" }); return;
     }
     if (pw !== pw2) {
       toast({ title: "Le password non coincidono", variant: "destructive" }); return;
