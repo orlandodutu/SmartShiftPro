@@ -72,7 +72,7 @@ export default function Dashboard() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({ nome: newUser.nome.trim(), ruolo: newUser.ruolo, password: "" }),
+        body: JSON.stringify({ nome: newUser.nome.trim(), ruolo: newUser.ruolo }),
       });
       if (res.ok) {
         await fetchData();

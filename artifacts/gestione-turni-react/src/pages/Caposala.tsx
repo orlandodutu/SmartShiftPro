@@ -10,7 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { RoleBadge } from "@/components/ui/RoleBadge";
 import {
   Check, CalendarRange, Calendar, ShieldAlert,
-  UserPlus, Pencil, Phone, Users, Copy, Trash2,
+  UserPlus, Pencil, Users, Copy, Trash2,
   Sun, Sunset, BedDouble, Stethoscope, Palmtree,
   ChevronRight,
 } from "lucide-react";
@@ -607,12 +607,6 @@ export default function Caposala() {
                         </span>
                       )}
                     </div>
-                    {d.telefono && (
-                      <span className="text-xs text-muted-foreground/60 flex items-center gap-1 mt-0.5">
-                        <Phone className="h-3 w-3" />
-                        +39 {d.telefono}
-                      </span>
-                    )}
                   </div>
                   <div className="flex items-center gap-1.5 shrink-0">
                     <button

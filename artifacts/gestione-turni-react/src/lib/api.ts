@@ -10,10 +10,6 @@ export type Dipendente = {
   malattia: number;
   is_admin: boolean;
   preferenze_turno: Array<'MATTINO' | 'POMERIGGIO' | 'NOTTE'>;
-  password_changed: boolean;
-  last_login: string;
-  last_seen: string;
-  telefono: string;
 };
 
 export type TipoTurno =

@@ -55,7 +55,7 @@ class Dipendente(db.Model):
     last_seen = db.Column(db.String(20), default='')
     telefono = db.Column(db.String(20), default='')
 
-    def to_dict(self, include_phone=False):
+    def to_dict(self):
         return {
             'id': self.id,
             'nome': self.nome,
@@ -66,10 +66,6 @@ class Dipendente(db.Model):
             'malattia': self.malattia,
             'is_admin': self.is_admin,
             'preferenze_turno': (self.preferenze_turno or 'MATTINO,POMERIGGIO,NOTTE').split(','),
-            'password_changed': bool(self.password_changed),
-            'last_login': self.last_login or '',
-            'last_seen': self.last_seen or '',
-            'telefono': (self.telefono or '') if include_phone else '',
         }
 
 
@@ -193,11 +189,8 @@ def me():
 
 @api.route('/api/dipendenti', methods=['GET'])
 def get_dipendenti():
-    uid = session.get('user_id')
-    viewer = db.session.get(Dipendente, uid) if uid else None
-    can_see_phone = bool(viewer and (viewer.is_admin or viewer.ruolo == 'CAPOSALA'))
     dipendenti = Dipendente.query.order_by(Dipendente.ruolo, Dipendente.nome).all()
-    return jsonify([d.to_dict(include_phone=can_see_phone) for d in dipendenti])
+    return jsonify([d.to_dict() for d in dipendenti])
 
 
 @api.route('/api/dipendenti', methods=['POST'])
@@ -214,17 +207,14 @@ def aggiungi_dipendente():
         return jsonify({'errore': 'Nome obbligatorio'}), 400
     if Dipendente.query.filter_by(nome=nome).first():
         return jsonify({'errore': 'Nome già esistente'}), 400
-    password = str(data.get('password', 'password123')).strip() or 'password123'
     nuovo = Dipendente(
         nome=nome,
         ruolo=ruolo,
-        password=password,
-        password_changed=False,
         preferenze_turno='MATTINO,POMERIGGIO,NOTTE',
     )
     db.session.add(nuovo)
     db.session.commit()
-    return jsonify(nuovo.to_dict(include_phone=True)), 201
+    return jsonify(nuovo.to_dict()), 201
 
 
 @api.route('/api/dipendenti/<int:id>', methods=['PUT'])
@@ -239,13 +229,11 @@ def aggiorna_dipendente(id):
     if not me.is_admin and d.is_admin:
         return jsonify({'errore': 'Non autorizzato'}), 403
     data = request.json
-    for field in ['ruolo', 'password', 'ferie', 'malattia', 'preferenze_turno']:
+    for field in ['ruolo', 'ferie', 'malattia', 'preferenze_turno']:
         if field in data:
             setattr(d, field, data[field])
-    if 'password_changed' in data:
-        d.password_changed = bool(data['password_changed'])
     db.session.commit()
-    return jsonify(d.to_dict(include_phone=True))
+    return jsonify(d.to_dict())
 
 
 @api.route('/api/dipendenti/<int:id>', methods=['DELETE'])
