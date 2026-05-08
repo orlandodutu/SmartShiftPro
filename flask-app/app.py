@@ -545,10 +545,11 @@ def _genera_interno(data_inizio_str, giorni):
     # MAT/POM balance tracker per OSS: per una migliore alternanza mattino/pomeriggio
     # {dip_id: {'MATTINO': n, 'POMERIGGIO': n}}  aggiornato da crea()
     tipo_count: dict = {}
+    # Consecutive work & last-type trackers per OSS
+    consec_work_days: dict = {}   # giorni lavorativi consecutivi per OSS
+    last_two_tipos:   dict = {}   # ultimi 2 tipi MAT/POM assegnati per OSS
 
     # ── MEMORIA PREGRESSA: pre-carica turni degli ultimi 30 gg prima di data_inizio ──
-    # Questo garantisce che la alternanza MAT/POM ricordi i mesi/settimane precedenti
-    # e che non si ripeta lo stesso turno per chi ha già accumulato squilibri.
     _seed_start = (data_inizio - timedelta(days=30)).strftime('%Y-%m-%d')
     _seed_end   = (data_inizio - timedelta(days=1)).strftime('%Y-%m-%d')
     for _t in Turno.query.filter(
@@ -558,6 +559,60 @@ def _genera_interno(data_inizio_str, giorni):
     ).all():
         _tc = tipo_count.setdefault(_t.dipendente_id, {'MATTINO': 0, 'POMERIGGIO': 0})
         _tc[_t.tipo] += 1
+
+    # ── PRE-SEED 7 gg: inizializza consecutivi e ultimi 2 tipi per OSS ──
+    _seed7_start  = (data_inizio - timedelta(days=7)).strftime('%Y-%m-%d')
+    _oss_ids_seed = [d.id for d in all_oss]
+    if _oss_ids_seed:
+        _rec7 = Turno.query.filter(
+            Turno.data >= _seed7_start,
+            Turno.data <= _seed_end,
+            Turno.dipendente_id.in_(_oss_ids_seed)
+        ).order_by(Turno.data.desc()).all()
+        _by_dip7: dict = {}
+        for _t7 in _rec7:
+            _by_dip7.setdefault(_t7.dipendente_id, []).append((_t7.data, _t7.tipo))
+        for _d7 in all_oss:
+            _shifts7 = _by_dip7.get(_d7.id, [])
+            _consec7 = 0
+            for _back in range(1, 8):
+                _day7 = (data_inizio - timedelta(days=_back)).strftime('%Y-%m-%d')
+                _day_t7 = [s for s in _shifts7 if s[0] == _day7]
+                if not _day_t7 or _day_t7[0][1] in ('RIPOSO', 'SMONTO', 'FERIE', 'MALATTIA'):
+                    break
+                _consec7 += 1
+            consec_work_days[_d7.id] = _consec7
+            _mp7 = sorted(
+                [s for s in _shifts7 if s[1] in ('MATTINO', 'POMERIGGIO')],
+                key=lambda x: x[0]
+            )
+            last_two_tipos[_d7.id] = [s[1] for s in _mp7[-2:]]
+
+    # ── Costanti copertura giornaliera OSS: minimo 3 MAT + 3 POM, massimo 4+4 ──
+    MIN_MAT, MIN_POM, MAX_MAT, MAX_POM = 3, 3, 4, 4
+
+    def _can_tipo(dip, tipo):
+        """Verifica che assegnare questo tipo non violi la regola dei 2 consecutivi dello stesso tipo."""
+        ltt = last_two_tipos.get(dip.id, [])
+        return len(ltt) < 2 or not (ltt[-2] == tipo and ltt[-1] == tipo)
+
+    def _scegli_tipo(dip, m, p, prefers_pom):
+        """Restituisce 'MATTINO', 'POMERIGGIO' o None rispettando consecutivi e cap 4+4."""
+        can_m = m < MAX_MAT and _can_tipo(dip, 'MATTINO')
+        can_p = p < MAX_POM and _can_tipo(dip, 'POMERIGGIO')
+        need_m, need_p = m < MIN_MAT, p < MIN_POM
+        if need_m and not need_p:
+            return 'MATTINO' if can_m else ('POMERIGGIO' if can_p else None)
+        if need_p and not need_m:
+            return 'POMERIGGIO' if can_p else ('MATTINO' if can_m else None)
+        if need_m and need_p:
+            if prefers_pom and can_p: return 'POMERIGGIO'
+            if can_m: return 'MATTINO'
+            return 'POMERIGGIO' if can_p else None
+        # Sopra il minimo: riempi fino al massimo in base alla preferenza
+        if prefers_pom and can_p: return 'POMERIGGIO'
+        if can_m: return 'MATTINO'
+        return 'POMERIGGIO' if can_p else None
 
     # ── AUS 6-day block tracker (keyed by (dip_id, block6) where block6 = ordinal // 6) ──
     aus_riposi_6d:  dict = {}
@@ -644,6 +699,16 @@ def _genera_interno(data_inizio_str, giorni):
             if tipo in ('MATTINO', 'POMERIGGIO'):
                 tc = tipo_count.setdefault(dip.id, {'MATTINO': 0, 'POMERIGGIO': 0})
                 tc[tipo] += 1
+            # Aggiorna tracker giorni consecutivi
+            if tipo in ('MATTINO', 'POMERIGGIO', 'NOTTE'):
+                consec_work_days[dip.id] = consec_work_days.get(dip.id, 0) + 1
+            else:
+                consec_work_days[dip.id] = 0
+            # Aggiorna last 2 tipi MAT/POM
+            if tipo in ('MATTINO', 'POMERIGGIO'):
+                _ltt = last_two_tipos.setdefault(dip.id, [])
+                _ltt.append(tipo)
+                last_two_tipos[dip.id] = _ltt[-2:]
             generati += 1
             return True
 
@@ -653,13 +718,8 @@ def _genera_interno(data_inizio_str, giorni):
             if dip_a and dip_a.id not in gia:
                 crea(dip_a, assenza.tipo)
 
-        # ── 1. Admin: fixed MATTINO (7h), rest Sunday ──
-        for dip in admin_staff:
-            if dip.id in gia: continue
-            if weekday == 6:
-                crea(dip, 'RIPOSO')
-            else:
-                crea(dip, 'MATTINO', 7)
+        # ── 1. Admin (Giustina): turni fissi non gestiti dal generatore automatico ──
+        # Giustina gestisce i propri turni separatamente; esclusa dalla griglia OSS.
 
         # ── 2. Infermiera: MATTINO, rest Sun always, alt-Sat ──
         # Guard: se ieri era già RIPOSO (es. sabato di riposo in settimana pari),
@@ -733,10 +793,13 @@ def _genera_interno(data_inizio_str, giorni):
         oss_rested     = []  # already have their RIPOSO this week
 
         for dip in oss_liberi:
-            # Fix B: post-SMONTO RIPOSO è sempre obbligatorio, anche se la settimana
-            # è già marcata come "riposata" (per via dello SMONTO del Fix A).
+            # Fix B: post-SMONTO RIPOSO è sempre obbligatorio
             is_post_smonto = dip.id in smonto_ieri
             if is_post_smonto:
+                oss_must_rest.append(dip)
+                continue
+            # Regola 6 giorni: dopo 6 giorni lavorativi consecutivi riposo obbligatorio
+            if consec_work_days.get(dip.id, 0) >= 6:
                 oss_must_rest.append(dip)
                 continue
             ha_riposato  = oss_riposi_week.get((dip.id, cal_week), False)
@@ -764,31 +827,15 @@ def _genera_interno(data_inizio_str, giorni):
 
         m_c = p_c = 0
         for dip in workers:
+            if m_c >= MAX_MAT and p_c >= MAX_POM:
+                break  # copertura massima raggiunta (4+4)
             tc = tipo_count.get(dip.id, {'MATTINO': 0, 'POMERIGGIO': 0})
-            emp_mat = tc['MATTINO']
-            emp_pom = tc['POMERIGGIO']
-            # Decide tipo preferito per questo lavoratore basandosi sul suo storico
-            prefers_pom = emp_mat > emp_pom  # ha già più mattini → dagli un pomeriggio se possibile
-
-            if m_c < 2 and p_c < 1:
-                # Dobbiamo riempire sia MAT che POM: assegna in base alla preferenza
-                if prefers_pom and p_c < 1:
-                    crea(dip, 'POMERIGGIO'); p_c += 1
-                else:
-                    crea(dip, 'MATTINO');    m_c += 1
-            elif m_c < 2:
-                crea(dip, 'MATTINO');    m_c += 1
-            elif p_c < 1:
-                crea(dip, 'POMERIGGIO'); p_c += 1
-            elif m_c < 3:
-                if prefers_pom and p_c < 3:
-                    crea(dip, 'POMERIGGIO'); p_c += 1
-                else:
-                    crea(dip, 'MATTINO');    m_c += 1
-            elif p_c < 3:
-                crea(dip, 'POMERIGGIO'); p_c += 1
-            else:
-                crea(dip, 'MATTINO');    m_c += 1
+            prefers_pom = tc['MATTINO'] > tc['POMERIGGIO']
+            tipo = _scegli_tipo(dip, m_c, p_c, prefers_pom)
+            if tipo:
+                crea(dip, tipo)
+                if tipo == 'MATTINO':      m_c += 1
+                elif tipo == 'POMERIGGIO': p_c += 1
 
         # Pull from must_rest SOLO se la copertura è sotto il minimo critico
         # Fix C: MAI strappare il riposo l'ultimo giorno della settimana (domenica).
@@ -797,26 +844,21 @@ def _genera_interno(data_inizio_str, giorni):
         oss_must_rest.sort(key=lambda d: ore_corrente.get(d.id, 0), reverse=True)
         if not is_true_sunday:
             for dip in list(oss_must_rest):
-                # Non strappare OSS post-SMONTO: il loro riposo è sacro
                 if dip.id in smonto_ieri:
                     continue
-                # Sull'ultimo giorno di generazione del mese, proteggere chi ha già
-                # un debito di riposo: sono stati già strappati questa settimana e
-                # devono recuperare il riposo prima che la settimana finisca.
                 if i == giorni - 1 and dip.id in oss_rest_debt:
                     continue
-                if m_c < 2:
+                if m_c < MIN_MAT:
                     oss_must_rest.remove(dip)
                     crea(dip, 'MATTINO');    m_c += 1
-                    oss_rest_debt.add(dip.id)   # Fix D: deve recuperare il riposo
-                elif m_c >= 2 and p_c < 1:
+                    oss_rest_debt.add(dip.id)
+                elif m_c >= MIN_MAT and p_c < MIN_POM:
                     oss_must_rest.remove(dip)
                     crea(dip, 'POMERIGGIO'); p_c += 1
-                    oss_rest_debt.add(dip.id)   # Fix D: deve recuperare il riposo
+                    oss_rest_debt.add(dip.id)
                 else:
                     break
-        # Se domenica (o ultimo giorno del periodo), estendi la copertura SOLO
-        # dai notturni già-riposati. NON usare i non-notturni per non gonfiare le ore.
+        # Se domenica (o ultimo giorno del periodo), estendi la copertura dai notturni riposati
         if is_true_sunday or i == giorni - 1:
             extras = sorted(
                 [d for d in oss_rested
@@ -824,12 +866,15 @@ def _genera_interno(data_inizio_str, giorni):
                 key=lambda d: ore_corrente.get(d.id, 0)
             )
             for dip in extras:
-                if m_c >= 3 and p_c >= 2:
+                if m_c >= MIN_MAT and p_c >= MIN_POM:
                     break
-                if m_c < 3:
-                    crea(dip, 'MATTINO');    m_c += 1
-                elif p_c < 2:
-                    crea(dip, 'POMERIGGIO'); p_c += 1
+                tc = tipo_count.get(dip.id, {'MATTINO': 0, 'POMERIGGIO': 0})
+                prefers_pom = tc['MATTINO'] > tc['POMERIGGIO']
+                tipo = _scegli_tipo(dip, m_c, p_c, prefers_pom)
+                if tipo:
+                    crea(dip, tipo)
+                    if tipo == 'MATTINO':      m_c += 1
+                    elif tipo == 'POMERIGGIO': p_c += 1
 
         # Assign RIPOSO — nessun limite giornaliero: garantisce 1 riposo/settimana a rotazione
         oss_must_rest_smonto = [d for d in oss_must_rest if d.id in smonto_ieri]
@@ -845,11 +890,12 @@ def _genera_interno(data_inizio_str, giorni):
         for dip in oss_must_rest_normali:
             if dip.id in riposo_ieri:
                 # Ieri era già RIPOSO: evita due riposi consecutivi → lavora oggi.
-                if m_c < 3:
-                    crea(dip, 'MATTINO');    m_c += 1
-                else:
-                    crea(dip, 'POMERIGGIO'); p_c += 1
-                # Non segniamo come riposato: prenderà il riposo un altro giorno questa settimana.
+                tc = tipo_count.get(dip.id, {'MATTINO': 0, 'POMERIGGIO': 0})
+                prefers_pom = tc['MATTINO'] > tc['POMERIGGIO']
+                tipo = _scegli_tipo(dip, m_c, p_c, prefers_pom) or 'MATTINO'
+                crea(dip, tipo)
+                if tipo == 'MATTINO':      m_c += 1
+                elif tipo == 'POMERIGGIO': p_c += 1
             else:
                 crea(dip, 'RIPOSO')
                 oss_riposi_week[(dip.id, cal_week)] = True
@@ -931,10 +977,8 @@ def _genera_interno(data_inizio_str, giorni):
             for t in Turno.query.filter_by(data=data_str, tipo='NOTTE').all()
         }
 
-        # 4c fires only when POM coverage is at zero (hard minimum not met).
-        # Raising the old threshold (p_c < 2) to (p_c < 1) eliminates the
-        # unnecessary MAT+POM doubles that were pushing non-night OSS to ~197h/month.
-        if p_c < 1:
+        # 4c: aggiunge POM in doppio (MAT+POM) se copertura POM è sotto il minimo (3)
+        if p_c < MIN_POM:
             mat_ids_oggi = {
                 t.dipendente_id
                 for t in Turno.query.filter_by(data=data_str, tipo='MATTINO').all()
@@ -947,7 +991,7 @@ def _genera_interno(data_inizio_str, giorni):
                 key=lambda d: ore_corrente.get(d.id, 0)
             )
             for dip in candidati_dop:
-                if p_c >= 1:
+                if p_c >= MIN_POM:
                     break
                 ore_p = ORE_MAP['POMERIGGIO']
                 db.session.add(Turno(
@@ -959,9 +1003,8 @@ def _genera_interno(data_inizio_str, giorni):
                 generati += 1
                 p_c += 1
 
-        # Symmetrical: if MATTINO coverage is still short, any OSS on POMERIGGIO
-        # (who has no NOTTE today) can add a MATTINO slot.
-        if m_c < 2:
+        # Symmetrical: aggiunge MAT in doppio (POM+MAT) se copertura MAT è sotto il minimo (3)
+        if m_c < MIN_MAT:
             pom_ids_oggi = {
                 t.dipendente_id
                 for t in Turno.query.filter_by(data=data_str, tipo='POMERIGGIO').all()
@@ -974,7 +1017,7 @@ def _genera_interno(data_inizio_str, giorni):
                 key=lambda d: ore_corrente.get(d.id, 0)
             )
             for dip in candidati_mat:
-                if m_c >= 2:
+                if m_c >= MIN_MAT:
                     break
                 ore_m = ORE_MAP['MATTINO']
                 db.session.add(Turno(
@@ -986,20 +1029,21 @@ def _genera_interno(data_inizio_str, giorni):
                 generati += 1
                 m_c += 1
 
-        # ── 4c-fallback. Emergency coverage: usa oss_rested quando la copertura
-        #    minima non è stata raggiunta dalle sezioni precedenti. ──
-        if m_c < 2 or p_c < 1:
+        # ── 4c-fallback. Emergency coverage: usa oss_rested se la copertura minima (3+3) non è raggiunta ──
+        if m_c < MIN_MAT or p_c < MIN_POM:
             emergency_pool = sorted(
                 [d for d in oss_rested if d.id not in gia],
                 key=lambda d: ore_corrente.get(d.id, 0)
             )
             for dip in emergency_pool:
-                if m_c >= 2 and p_c >= 1:
+                if m_c >= MIN_MAT and p_c >= MIN_POM:
                     break
-                if m_c < 2:
-                    crea(dip, 'MATTINO');    m_c += 1
-                elif p_c < 1:
-                    crea(dip, 'POMERIGGIO'); p_c += 1
+                tc = tipo_count.get(dip.id, {'MATTINO': 0, 'POMERIGGIO': 0})
+                prefers_pom = tc['MATTINO'] > tc['POMERIGGIO']
+                tipo = _scegli_tipo(dip, m_c, p_c, prefers_pom) or ('MATTINO' if m_c < MIN_MAT else 'POMERIGGIO')
+                crea(dip, tipo)
+                if tipo == 'MATTINO':      m_c += 1
+                elif tipo == 'POMERIGGIO': p_c += 1
 
         # ── 4d. Equalization doubles for night-eligible OSS ──
         # Each NOTTE cycle (NOTTE 10h + SMONTO 0h + RIPOSO 0h) gives only 10h for

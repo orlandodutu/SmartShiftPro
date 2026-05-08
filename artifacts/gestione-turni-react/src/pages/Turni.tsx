@@ -84,7 +84,7 @@ export default function Turni() {
 
   const fetchTurni = async () => {
     const res = await fetch("/flask-api/api/turni", { credentials: "include" });
-    if (res.ok) setTurni(await res.json());
+    if (res.ok) setTurni((await res.json()).filter((t: Turno) => t.ruolo !== "DEV"));
   };
 
   /* ── WhatsApp Share ── */
@@ -271,7 +271,7 @@ export default function Turni() {
                     <Select value={newShift.dipendente_id} onValueChange={(v) => setNewShift({ ...newShift, dipendente_id: v })}>
                       <SelectTrigger className="border-white/10 bg-white/5"><SelectValue placeholder="Seleziona..." /></SelectTrigger>
                       <SelectContent>
-                        {dipendenti.map((d) => <SelectItem key={d.id} value={d.id.toString()}>{d.nome} — {d.ruolo}</SelectItem>)}
+                        {dipendenti.filter(d => !d.is_admin).map((d) => <SelectItem key={d.id} value={d.id.toString()}>{d.nome} — {d.ruolo}</SelectItem>)}
                       </SelectContent>
                     </Select>
                   </div>
@@ -508,7 +508,7 @@ export default function Turni() {
               <Select value={editForm.dipendente_id} onValueChange={(v) => setEditForm({ ...editForm, dipendente_id: v })}>
                 <SelectTrigger className="border-white/10 bg-white/5"><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  {dipendenti.map((d) => <SelectItem key={d.id} value={d.id.toString()}>{d.nome} — {d.ruolo}</SelectItem>)}
+                  {dipendenti.filter(d => !d.is_admin).map((d) => <SelectItem key={d.id} value={d.id.toString()}>{d.nome} — {d.ruolo}</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>
