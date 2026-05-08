@@ -272,22 +272,6 @@ def admin_reset_password(id):
     return jsonify({'success': True, 'nome': target.nome})
 
 
-@api.route('/api/admin_reset_caposala', methods=['POST'])
-def admin_reset_caposala():
-    data = request.json or {}
-    master_pw = os.environ.get('MASTER_PASSWORD', '').strip()
-    if not master_pw or data.get('master') != master_pw:
-        return jsonify({'errore': 'Non autorizzato'}), 403
-    cap = Dipendente.query.filter_by(ruolo='CAPOSALA').first()
-    if not cap:
-        return jsonify({'errore': 'Caposala non trovata'}), 404
-    new_pw = data.get('new_password', 'caposala123')
-    cap.password = new_pw
-    cap.password_changed = True
-    db.session.commit()
-    return jsonify({'ok': True, 'nome': cap.nome, 'password': new_pw})
-
-
 @api.route('/api/logout', methods=['POST'])
 def logout():
     session.clear()
