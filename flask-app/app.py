@@ -617,6 +617,8 @@ def _genera_interno(data_inizio_str, giorni):
     oss_riposi_week: dict = {}
     oss_notti_week:  dict = {}
     last_cal_week:   str  = ''
+    # OSS pulled from must_rest this week: they MUST rest on the next available day
+    oss_rest_debt:   set  = set()
 
     # ── AUS 6-day block tracker (keyed by (dip_id, block6) where block6 = ordinal // 6) ──
     aus_riposi_6d:  dict = {}
@@ -636,6 +638,7 @@ def _genera_interno(data_inizio_str, giorni):
         # On entering a new calendar week: load existing RIPOSO/NOTTE for OSS from DB.
         if cal_week != last_cal_week:
             last_cal_week = cal_week
+            oss_rest_debt.clear()   # reset makeup-rest debt at start of each new week
             for r in Turno.query.filter(
                 Turno.tipo == 'RIPOSO',
                 Turno.data >= cal_week,
@@ -735,7 +738,10 @@ def _genera_interno(data_inizio_str, giorni):
             if dip.id in gia: continue
             if dip.id in notte_ieri:
                 crea(dip, 'SMONTO')
-            # Note: day-after-SMONTO rest is handled via urgency in section 4 below
+                # Fix A: SMONTO = recupero post-notte, conta come riposo settimanale.
+                # Questo evita che l'algoritmo cerchi UN ALTRO riposo nella stessa settimana,
+                # ma NON impedisce il RIPOSO post-SMONTO (Fix B lo gestisce con is_post_smonto).
+                oss_riposi_week[(dip.id, cal_week)] = True
 
         # ── 3b. Pre-reserve NOTTE candidate (exclude from regular shift pool) ──
         # Selecting the NOTTE worker BEFORE section 4 guarantees coverage even on Sunday
@@ -769,6 +775,10 @@ def _genera_interno(data_inizio_str, giorni):
         # Post-SMONTO rest: OSS who had SMONTO yesterday need today as their RIPOSO.
         week_num_local = i // 7
         is_last_day_of_week = (weekday == 6) or (i == giorni - 1)
+        # is_true_sunday: usato per Fix C (niente pull da must_rest) e estensione domenicale.
+        # È DISTINTO da is_last_day_of_week (che include l'ultimo giorno di generazione):
+        # non vogliamo bloccare la copertura quando il mese finisce a metà settimana.
+        is_true_sunday = (weekday == 6)
         n = len(all_oss)
         # Exclude the pre-reserved NOTTE candidate from regular assignment
         oss_liberi = [d for d in all_oss
@@ -780,14 +790,21 @@ def _genera_interno(data_inizio_str, giorni):
         oss_rested     = []  # already have their RIPOSO this week
 
         for dip in oss_liberi:
+            # Fix B: post-SMONTO RIPOSO è sempre obbligatorio, anche se la settimana
+            # è già marcata come "riposata" (per via dello SMONTO del Fix A).
+            is_post_smonto = dip.id in smonto_ieri
+            if is_post_smonto:
+                oss_must_rest.append(dip)
+                continue
             ha_riposato  = oss_riposi_week.get((dip.id, cal_week), False)
             if ha_riposato:
                 oss_rested.append(dip)
                 continue
             p_rank        = all_oss.index(dip)
             rest_weekday  = (p_rank + week_num_local) % 7
-            is_post_smonto = dip.id in smonto_ieri  # day after SMONTO → mandatory rest
-            if is_post_smonto or weekday == rest_weekday or is_last_day_of_week:
+            # Fix D: OSS con debito riposo (strappati questa settimana) → must_rest ogni giorno
+            has_rest_debt = dip.id in oss_rest_debt
+            if has_rest_debt or weekday == rest_weekday or is_last_day_of_week:
                 oss_must_rest.append(dip)
             else:
                 oss_may_rest.append(dip)
@@ -799,7 +816,12 @@ def _genera_interno(data_inizio_str, giorni):
 
         m_c = p_c = 0
         for dip in workers:
-            if m_c < 3:
+            # Priorità: prima il minimo (2 MAT, poi 1 POM), poi i surplus
+            if m_c < 2:
+                crea(dip, 'MATTINO');    m_c += 1
+            elif p_c < 1:
+                crea(dip, 'POMERIGGIO'); p_c += 1
+            elif m_c < 3:
                 crea(dip, 'MATTINO');    m_c += 1
             elif p_c < 3:
                 crea(dip, 'POMERIGGIO'); p_c += 1
@@ -807,17 +829,45 @@ def _genera_interno(data_inizio_str, giorni):
                 crea(dip, 'MATTINO');    m_c += 1
 
         # Pull from must_rest SOLO se la copertura è sotto il minimo critico
-        # Sort by most hours first (they can "afford" to lose a rest day)
+        # Fix C: MAI strappare il riposo l'ultimo giorno della settimana (domenica).
+        # La domenica garantisce il riposo a chiunque non l'abbia ancora avuto;
+        # la copertura viene assicurata dai doppi turni dei già-riposati.
         oss_must_rest.sort(key=lambda d: ore_corrente.get(d.id, 0), reverse=True)
-        for dip in list(oss_must_rest):
-            if m_c < 2:
-                oss_must_rest.remove(dip)
-                crea(dip, 'MATTINO');    m_c += 1
-            elif m_c >= 2 and p_c < 1:
-                oss_must_rest.remove(dip)
-                crea(dip, 'POMERIGGIO'); p_c += 1
-            else:
-                break
+        if not is_true_sunday:
+            for dip in list(oss_must_rest):
+                # Non strappare OSS post-SMONTO: il loro riposo è sacro
+                if dip.id in smonto_ieri:
+                    continue
+                # Sull'ultimo giorno di generazione del mese, proteggere chi ha già
+                # un debito di riposo: sono stati già strappati questa settimana e
+                # devono recuperare il riposo prima che la settimana finisca.
+                if i == giorni - 1 and dip.id in oss_rest_debt:
+                    continue
+                if m_c < 2:
+                    oss_must_rest.remove(dip)
+                    crea(dip, 'MATTINO');    m_c += 1
+                    oss_rest_debt.add(dip.id)   # Fix D: deve recuperare il riposo
+                elif m_c >= 2 and p_c < 1:
+                    oss_must_rest.remove(dip)
+                    crea(dip, 'POMERIGGIO'); p_c += 1
+                    oss_rest_debt.add(dip.id)   # Fix D: deve recuperare il riposo
+                else:
+                    break
+        # Se domenica (o ultimo giorno del periodo), estendi la copertura SOLO
+        # dai notturni già-riposati. NON usare i non-notturni per non gonfiare le ore.
+        if is_true_sunday or i == giorni - 1:
+            extras = sorted(
+                [d for d in oss_rested
+                 if d.id not in gia and is_notte_eligible(d)],
+                key=lambda d: ore_corrente.get(d.id, 0)
+            )
+            for dip in extras:
+                if m_c >= 3 and p_c >= 2:
+                    break
+                if m_c < 3:
+                    crea(dip, 'MATTINO');    m_c += 1
+                elif p_c < 2:
+                    crea(dip, 'POMERIGGIO'); p_c += 1
 
         # Assign RIPOSO — nessun limite giornaliero: garantisce 1 riposo/settimana a rotazione
         oss_must_rest_smonto = [d for d in oss_must_rest if d.id in smonto_ieri]
@@ -828,6 +878,7 @@ def _genera_interno(data_inizio_str, giorni):
             # Il giorno prima era SMONTO (non RIPOSO), quindi non ci può essere un doppio riposo.
             crea(dip, 'RIPOSO')
             oss_riposi_week[(dip.id, cal_week)] = True
+            oss_rest_debt.discard(dip.id)
 
         for dip in oss_must_rest_normali:
             if dip.id in riposo_ieri:
@@ -840,6 +891,7 @@ def _genera_interno(data_inizio_str, giorni):
             else:
                 crea(dip, 'RIPOSO')
                 oss_riposi_week[(dip.id, cal_week)] = True
+                oss_rest_debt.discard(dip.id)
 
         # ── 4b. NOTTE assignment — after regular OSS shifts to allow double shifts ──
         #
@@ -917,7 +969,10 @@ def _genera_interno(data_inizio_str, giorni):
             for t in Turno.query.filter_by(data=data_str, tipo='NOTTE').all()
         }
 
-        if p_c < 2:
+        # 4c fires only when POM coverage is at zero (hard minimum not met).
+        # Raising the old threshold (p_c < 2) to (p_c < 1) eliminates the
+        # unnecessary MAT+POM doubles that were pushing non-night OSS to ~197h/month.
+        if p_c < 1:
             mat_ids_oggi = {
                 t.dipendente_id
                 for t in Turno.query.filter_by(data=data_str, tipo='MATTINO').all()
@@ -930,7 +985,7 @@ def _genera_interno(data_inizio_str, giorni):
                 key=lambda d: ore_corrente.get(d.id, 0)
             )
             for dip in candidati_dop:
-                if p_c >= 2:
+                if p_c >= 1:
                     break
                 ore_p = ORE_MAP['POMERIGGIO']
                 db.session.add(Turno(
@@ -944,7 +999,7 @@ def _genera_interno(data_inizio_str, giorni):
 
         # Symmetrical: if MATTINO coverage is still short, any OSS on POMERIGGIO
         # (who has no NOTTE today) can add a MATTINO slot.
-        if m_c < 3:
+        if m_c < 2:
             pom_ids_oggi = {
                 t.dipendente_id
                 for t in Turno.query.filter_by(data=data_str, tipo='POMERIGGIO').all()
@@ -957,7 +1012,7 @@ def _genera_interno(data_inizio_str, giorni):
                 key=lambda d: ore_corrente.get(d.id, 0)
             )
             for dip in candidati_mat:
-                if m_c >= 3:
+                if m_c >= 2:
                     break
                 ore_m = ORE_MAP['MATTINO']
                 db.session.add(Turno(
@@ -968,6 +1023,21 @@ def _genera_interno(data_inizio_str, giorni):
                 ore_corrente[dip.id] = ore_corrente.get(dip.id, 0) + ore_m
                 generati += 1
                 m_c += 1
+
+        # ── 4c-fallback. Emergency coverage: usa oss_rested quando la copertura
+        #    minima non è stata raggiunta dalle sezioni precedenti. ──
+        if m_c < 2 or p_c < 1:
+            emergency_pool = sorted(
+                [d for d in oss_rested if d.id not in gia],
+                key=lambda d: ore_corrente.get(d.id, 0)
+            )
+            for dip in emergency_pool:
+                if m_c >= 2 and p_c >= 1:
+                    break
+                if m_c < 2:
+                    crea(dip, 'MATTINO');    m_c += 1
+                elif p_c < 1:
+                    crea(dip, 'POMERIGGIO'); p_c += 1
 
         # ── 4d. Equalization doubles for night-eligible OSS ──
         # Each NOTTE cycle (NOTTE 10h + SMONTO 0h + RIPOSO 0h) gives only 10h for
@@ -995,7 +1065,7 @@ def _genera_interno(data_inizio_str, giorni):
                 key=lambda d: ore_corrente.get(d.id, 0)
             ):
                 gap = avg_ore_4d - ore_corrente.get(dip.id, 0)
-                if gap <= 7:
+                if gap <= 3:
                     continue
                 if dip.id in mat_ids_4d and dip.id not in pom_ids_4d:
                     ore_p = ORE_MAP['POMERIGGIO']
