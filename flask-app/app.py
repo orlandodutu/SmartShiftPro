@@ -773,6 +773,9 @@ def _genera_interno(data_inizio_str, giorni):
         for cand in notte_cands_sorted:
             if cand.id in gia or cand.id in assenti_ids:
                 continue
+            # Chi deve riposare dopo doppia catena NOTTE→NOTTE→SMONTO non può fare NOTTE
+            if cand.id in smonto_ieri and cand.id in doppia_notte_chain:
+                continue
             if oss_notti_week.get((cand.id, cal_week), False):
                 continue  # Prefer fresh (no NOTTE yet this week)
             notte_riserva_id = cand.id
@@ -780,6 +783,9 @@ def _genera_interno(data_inizio_str, giorni):
         if notte_riserva_id is None:
             for cand in notte_cands_sorted:
                 if cand.id not in gia and cand.id not in assenti_ids:
+                    # Non può fare NOTTE chi deve riposare dopo doppia catena
+                    if cand.id in smonto_ieri and cand.id in doppia_notte_chain:
+                        continue
                     notte_riserva_id = cand.id
                     break
         # (If notte_riserva_id is still None, we'll fall back to double shifts in 4b)
@@ -908,7 +914,10 @@ def _genera_interno(data_inizio_str, giorni):
                 # Ieri era già RIPOSO: evita due riposi consecutivi → lavora oggi.
                 tc = tipo_count.get(dip.id, {'MATTINO': 0, 'POMERIGGIO': 0})
                 prefers_pom = tc['MATTINO'] > tc['POMERIGGIO']
-                tipo = _scegli_tipo(dip, m_c, p_c, prefers_pom) or 'MATTINO'
+                tipo = _scegli_tipo(dip, m_c, p_c, prefers_pom)
+                if tipo is None:
+                    # Fallback: rispetta _can_tipo anche quando l'alternativa non è disponibile
+                    tipo = 'POMERIGGIO' if _can_tipo(dip, 'POMERIGGIO') else 'MATTINO'
                 crea(dip, tipo)
                 if tipo == 'MATTINO':      m_c += 1
                 elif tipo == 'POMERIGGIO': p_c += 1
@@ -1056,7 +1065,13 @@ def _genera_interno(data_inizio_str, giorni):
                     break
                 tc = tipo_count.get(dip.id, {'MATTINO': 0, 'POMERIGGIO': 0})
                 prefers_pom = tc['MATTINO'] > tc['POMERIGGIO']
-                tipo = _scegli_tipo(dip, m_c, p_c, prefers_pom) or ('MATTINO' if m_c < MIN_MAT else 'POMERIGGIO')
+                tipo = _scegli_tipo(dip, m_c, p_c, prefers_pom)
+                if tipo is None:
+                    # Fallback emergenza: rispetta _can_tipo dove possibile
+                    if m_c < MIN_MAT:
+                        tipo = 'MATTINO' if _can_tipo(dip, 'MATTINO') else 'POMERIGGIO'
+                    else:
+                        tipo = 'POMERIGGIO' if _can_tipo(dip, 'POMERIGGIO') else 'MATTINO'
                 crea(dip, tipo)
                 if tipo == 'MATTINO':      m_c += 1
                 elif tipo == 'POMERIGGIO': p_c += 1
