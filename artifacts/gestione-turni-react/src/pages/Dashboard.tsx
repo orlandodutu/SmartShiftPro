@@ -15,7 +15,7 @@ import {
   Clock, Moon, CalendarOff, Pill, User,
   Settings2, Sun, Sunset, BedDouble, Check, Trash2,
   PlusCircle, AlertTriangle, Palmtree, CalendarX, RotateCcw, ShieldAlert, UserPlus,
-  CalendarDays, Edit2, Save, X, Lock, Users, Activity,
+  CalendarDays, Edit2, Save, X, Lock, Users, Activity, Zap,
 } from "lucide-react";
 import type { Ruolo } from "@/lib/api";
 
@@ -60,6 +60,8 @@ export default function Dashboard() {
   const [addUserOpen, setAddUserOpen] = useState(false);
   const [addUserLoading, setAddUserLoading] = useState(false);
   const [newUser, setNewUser] = useState<{ nome: string; ruolo: Ruolo }>({ nome: "", ruolo: "OSS" });
+  const [lastAddedDip, setLastAddedDip] = useState<Dipendente | null>(null);
+  const [pianificaLoading, setPianificaLoading] = useState<number | null>(null);
 
   const handleAddUser = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -73,15 +75,42 @@ export default function Dashboard() {
         body: JSON.stringify({ nome: newUser.nome.trim(), ruolo: newUser.ruolo, password: "" }),
       });
       if (res.ok) {
-        toast({ title: `${newUser.nome.trim()} aggiunto` });
-        setAddUserOpen(false);
-        setNewUser({ nome: "", ruolo: "OSS" });
         await fetchData();
+        setAddUserOpen(false);
+        // Find the newly created employee to offer auto-schedule
+        const listRes = await fetch("/flask-api/api/dipendenti", { credentials: "include" });
+        if (listRes.ok) {
+          const allDip: Dipendente[] = await listRes.json();
+          const added = allDip.find((d) => d.nome === newUser.nome.trim());
+          if (added) setLastAddedDip(added);
+        }
+        toast({ title: `✓ ${newUser.nome.trim()} aggiunto al sistema`, description: "Clicca ⚡ nella lista per pianificare i turni automaticamente." });
+        setNewUser({ nome: "", ruolo: "OSS" });
       } else {
         const err = await res.json();
         toast({ title: err.errore || "Errore nella creazione", variant: "destructive" });
       }
     } finally { setAddUserLoading(false); }
+  };
+
+  const handlePianificaDipendente = async (dip: Dipendente) => {
+    setPianificaLoading(dip.id);
+    try {
+      const res = await fetch("/flask-api/api/turni/pianifica_dipendente", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ dipendente_id: dip.id }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        toast({ title: `✓ Turni pianificati per ${dip.nome}`, description: `${data.generati} turni aggiunti fino a fine mese.` });
+        setLastAddedDip(null);
+        await fetchData();
+      } else {
+        toast({ title: data.errore || "Errore pianificazione", variant: "destructive" });
+      }
+    } finally { setPianificaLoading(null); }
   };
 
   /* Delete dipendente */
@@ -447,6 +476,26 @@ export default function Dashboard() {
                 </CardTitle>
               </CardHeader>
               <CardContent className="p-0">
+                {lastAddedDip && (
+                  <div className="mx-4 mt-3 mb-1 flex items-center gap-3 rounded-xl border border-amber-500/30 bg-amber-500/8 px-4 py-2.5">
+                    <Zap className="h-4 w-4 text-amber-400 shrink-0 animate-pulse" />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-semibold text-amber-300">{lastAddedDip.nome} aggiunto — pianifica i turni</p>
+                      <p className="text-[10px] text-muted-foreground">Clicca ⚡ nella riga per generare i turni fino a fine mese</p>
+                    </div>
+                    <button
+                      onClick={() => handlePianificaDipendente(lastAddedDip)}
+                      disabled={pianificaLoading === lastAddedDip.id}
+                      className="shrink-0 px-3 py-1 rounded-lg text-xs font-bold transition-all"
+                      style={{ background: "var(--btn-primary-bg)", color: "var(--btn-primary-color)" }}
+                    >
+                      {pianificaLoading === lastAddedDip.id ? "Pianificazione..." : "Pianifica ora"}
+                    </button>
+                    <button onClick={() => setLastAddedDip(null)} className="text-muted-foreground/50 hover:text-muted-foreground">
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                )}
                 <Table>
                   <TableHeader>
                     <TableRow className="border-white/5 hover:bg-transparent">
@@ -493,16 +542,33 @@ export default function Dashboard() {
                           </TableCell>
                           <TableCell className="text-right font-mono text-sm text-gold font-bold">{dip.ore_totali}</TableCell>
                           <TableCell className="text-right pr-4 font-mono text-xs text-slate-400">{dip.notti_fatte}</TableCell>
-                          <TableCell className="pr-3 w-10">
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-6 w-6 text-red-400/30 hover:text-red-400 hover:bg-red-500/10"
-                              onClick={(e) => { e.stopPropagation(); setDeleteTarget(dip); }}
-                              data-testid={`dash-delete-${dip.id}`}
-                            >
-                              <Trash2 className="h-3 w-3" />
-                            </Button>
+                          <TableCell className="pr-3 w-20">
+                            <div className="flex items-center gap-1 justify-end">
+                              {(lastAddedDip?.id === dip.id || !turnoOggi) && user?.is_admin && (
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  title="Pianifica turni automaticamente fino a fine mese"
+                                  className={`h-6 w-6 transition-all ${lastAddedDip?.id === dip.id ? "text-amber-400 hover:text-amber-300 hover:bg-amber-500/15 animate-pulse" : "text-muted-foreground/30 hover:text-amber-400 hover:bg-amber-500/10"}`}
+                                  onClick={(e) => { e.stopPropagation(); handlePianificaDipendente(dip); }}
+                                  disabled={pianificaLoading === dip.id}
+                                  data-testid={`dash-pianifica-${dip.id}`}
+                                >
+                                  {pianificaLoading === dip.id
+                                    ? <span className="h-3 w-3 border border-amber-400 border-t-transparent rounded-full animate-spin block" />
+                                    : <Zap className="h-3 w-3" />}
+                                </Button>
+                              )}
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-6 w-6 text-red-400/30 hover:text-red-400 hover:bg-red-500/10"
+                                onClick={(e) => { e.stopPropagation(); setDeleteTarget(dip); }}
+                                data-testid={`dash-delete-${dip.id}`}
+                              >
+                                <Trash2 className="h-3 w-3" />
+                              </Button>
+                            </div>
                           </TableCell>
                         </TableRow>
                       );
@@ -921,7 +987,7 @@ export default function Dashboard() {
               </Button>
               <button type="submit" disabled={addUserLoading}
                 className="flex-1 py-2.5 rounded-xl font-bold text-sm glow-gold disabled:opacity-40 flex items-center justify-center gap-2 min-h-[44px]"
-                style={{ background: "linear-gradient(155deg, #B8860B 0%, #FFBF00 38%, #FFE566 52%, #FFBF00 75%, #B8860B 100%)", color: "#0f172a" }}>
+                style={{ background: "var(--btn-primary-bg)", color: "var(--btn-primary-color)" }}>
                 <UserPlus className="h-4 w-4" />
                 {addUserLoading ? "Creazione..." : "Aggiungi"}
               </button>

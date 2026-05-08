@@ -306,74 +306,106 @@ export default function Griglia() {
 
   /* ── Print ── */
   const handlePrint = () => {
-    const PRINT_COLORS: Record<string, { bg: string; text: string; label: string }> = {
-      MATTINO:    { bg: "#78350f30", text: "#fcd34d", label: "MAT" },
-      POMERIGGIO: { bg: "#7c2d1230", text: "#fdba74", label: "POM" },
-      NOTTE:      { bg: "#312e8130", text: "#a5b4fc", label: "NOT" },
-      SMONTO:     { bg: "#4c1d9530", text: "#c4b5fd", label: "SMO" },
-      FERIE:      { bg: "#05603a30", text: "#6ee7b7", label: "FER" },
-      MALATTIA:   { bg: "#7f1d1d30", text: "#fca5a5", label: "MAL" },
-      RIPOSO:     { bg: "#1e293b30", text: "#94a3b8", label: "RIP" },
+    const SHIFT_STYLE: Record<string, { bg: string; border: string; text: string; label: string }> = {
+      MATTINO:    { bg: "#fff9e6", border: "#f59e0b", text: "#92400e", label: "MAT" },
+      POMERIGGIO: { bg: "#fff3e0", border: "#f97316", text: "#7c2d12", label: "POM" },
+      NOTTE:      { bg: "#ede9fe", border: "#7c3aed", text: "#3b0764", label: "NOT" },
+      SMONTO:     { bg: "#f5f3ff", border: "#a78bfa", text: "#4c1d95", label: "SMO" },
+      FERIE:      { bg: "#dcfce7", border: "#16a34a", text: "#14532d", label: "FER" },
+      MALATTIA:   { bg: "#fee2e2", border: "#dc2626", text: "#7f1d1d", label: "MAL" },
+      RIPOSO:     { bg: "#f1f5f9", border: "#94a3b8", text: "#475569", label: "RIP" },
     };
 
     const headers = dates.map((d) => {
-      const { num, name, isSun } = fmtDay(d);
+      const { num, name, isSun, isSat } = fmtDay(d);
       const isToday = d === today;
-      return `<th style="text-align:center;padding:4px 2px;font-size:9px;min-width:32px;${isToday ? "background:#92400e30;" : isSun ? "opacity:0.5;" : ""}"><div style="font-weight:700;font-size:8px;opacity:0.7;text-transform:uppercase;">${name}</div><div style="font-size:13px;font-weight:900;">${num}</div></th>`;
+      const dayBg = isToday ? "background:#dbeafe;" : (isSun || isSat) ? "background:#f8fafc;" : "";
+      const dayColor = isToday ? "color:#1d4ed8;font-weight:900;" : (isSun || isSat) ? "color:#94a3b8;" : "color:#374151;";
+      return `<th style="text-align:center;padding:5px 3px;min-width:36px;${dayBg}${dayColor}border-right:1px solid #e5e7eb;">
+        <div style="font-size:8px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;">${name}</div>
+        <div style="font-size:14px;font-weight:900;line-height:1.1;">${num}</div>
+      </th>`;
     }).join("");
 
-    const rows = sortedDip.map((dip, idx) => {
-      const roleLabel = dip.ruolo === "INFERMIERA" ? "INF/A" : dip.ruolo === "AUSILIARIO" ? "AUS" : dip.ruolo.substring(0, 3);
+    // Group employees by role for a cleaner schedule view
+    const roleOrder: Record<string, number> = { DEV: 0, CAPOSALA: 1, INFERMIERA: 2, OSS: 3, AUSILIARIO: 4 };
+    const grouped = [...sortedDip].sort((a, b) => (roleOrder[a.ruolo] ?? 9) - (roleOrder[b.ruolo] ?? 9));
+
+    let lastRole = "";
+    const rows = grouped.map((dip) => {
+      let sectionRow = "";
+      if (dip.ruolo !== lastRole) {
+        lastRole = dip.ruolo;
+        const roleLabel = dip.ruolo === "INFERMIERA" ? "Infermieri" : dip.ruolo === "AUSILIARIO" ? "Ausiliari" : dip.ruolo === "OSS" ? "OSS" : dip.ruolo;
+        sectionRow = `<tr><td colspan="${dates.length + 1}" style="background:#f1f5f9;padding:5px 10px;font-size:9px;font-weight:800;text-transform:uppercase;letter-spacing:0.12em;color:#64748b;border-top:2px solid #e2e8f0;">${roleLabel}</td></tr>`;
+      }
       const cells = dates.map((d) => {
         const t = pivot[dip.id]?.[d];
-        if (!t) return `<td style="text-align:center;color:#475569;font-size:10px;padding:2px;">—</td>`;
-        const c = PRINT_COLORS[t.tipo] || { bg: "#ffffff20", text: "#ffffff", label: t.tipo.substring(0, 3) };
-        return `<td style="text-align:center;padding:3px 2px;"><span style="display:inline-block;padding:2px 5px;border-radius:4px;background:${c.bg};color:${c.text};font-size:9px;font-weight:800;border:1px solid ${c.text}50;">${c.label}</span></td>`;
+        const isToday = d === today;
+        const { isSun, isSat } = fmtDay(d);
+        const cellBg = isToday ? "background:#eff6ff;" : (isSun || isSat) ? "background:#fafafa;" : "";
+        if (!t) return `<td style="text-align:center;padding:4px 2px;${cellBg}border-right:1px solid #f1f5f9;color:#cbd5e1;font-size:10px;">·</td>`;
+        const s = SHIFT_STYLE[t.tipo] || { bg: "#f9fafb", border: "#e5e7eb", text: "#374151", label: t.tipo.slice(0, 3) };
+        return `<td style="text-align:center;padding:4px 2px;${cellBg}border-right:1px solid #f1f5f9;">
+          <span style="display:inline-block;padding:2px 5px;border-radius:4px;background:${s.bg};color:${s.text};font-size:9px;font-weight:800;border:1px solid ${s.border};letter-spacing:0.02em;">${s.label}${t.manuale ? "🔒" : ""}</span>
+        </td>`;
       }).join("");
-      return `<tr style="${idx % 2 === 0 ? "" : "background:#0f1f3d;"}"><td style="padding:4px 8px;font-weight:700;font-size:11px;white-space:nowrap;border-right:2px solid #334155;min-width:130px;">${dip.nome}<br><span style="font-size:8px;color:#64748b;font-weight:600;">${roleLabel}</span></td>${cells}</tr>`;
+      const rowBg = "background:#ffffff;";
+      return `${sectionRow}<tr style="${rowBg}border-bottom:1px solid #f1f5f9;" onmouseover="this.style.background='#f9fafb'" onmouseout="this.style.background='${rowBg.replace('background:','').replace(';','')}'" >
+        <td style="padding:5px 10px;font-weight:600;font-size:11px;white-space:nowrap;border-right:2px solid #e2e8f0;min-width:130px;color:#111827;">${dip.nome}</td>
+        ${cells}
+      </tr>`;
     }).join("");
 
     const today_str = new Date().toLocaleDateString("it-IT", { day: "numeric", month: "long", year: "numeric" });
     const html = `<!DOCTYPE html><html lang="it"><head><meta charset="UTF-8">
-<title>SmartShift Pro — Griglia — ${periodLabel}</title>
+<title>Griglia Turni — ${periodLabel}</title>
 <style>
 * { margin:0; padding:0; box-sizing:border-box; }
-body { font-family:'Segoe UI',Arial,sans-serif; background:#0f172a; color:#e2e8f0; padding:20px; }
-.header { display:flex; align-items:center; gap:12px; margin-bottom:16px; border-bottom:2px solid #FFBF0040; padding-bottom:12px; }
-.logo { font-size:20px; font-weight:900; color:#FFBF00; letter-spacing:-0.5px; }
-.meta { font-size:10px; color:#64748b; }
-.period { font-size:14px; font-weight:700; color:#e2e8f0; text-transform:capitalize; margin-top:2px; }
-table { border-collapse:collapse; width:100%; font-size:10px; margin-top:4px; }
-thead th { background:#1e293b; border-bottom:2px solid #334155; color:#94a3b8; font-size:9px; }
-thead th:first-child { text-align:left; padding:6px 8px; }
-tbody td { border-bottom:1px solid #1e293b; vertical-align:middle; }
-.legend { display:flex; gap:8px; flex-wrap:wrap; margin-top:14px; font-size:9px; }
-.leg { padding:2px 7px; border-radius:4px; font-weight:800; border:1px solid; }
+body { font-family:'Segoe UI',system-ui,Arial,sans-serif; background:#ffffff; color:#111827; padding:20px; font-size:11px; }
+.header { display:flex; align-items:flex-start; justify-content:space-between; margin-bottom:14px; padding-bottom:10px; border-bottom:2px solid #e2e8f0; }
+.logo { font-size:18px; font-weight:900; color:#059669; letter-spacing:-0.5px; }
+.subtitle { font-size:10px; color:#6b7280; margin-top:2px; }
+.period { font-size:13px; font-weight:700; color:#111827; text-transform:capitalize; margin-top:3px; }
+.print-date { font-size:9px; color:#9ca3af; text-align:right; }
+table { border-collapse:collapse; width:100%; font-size:10px; border:1px solid #e2e8f0; border-radius:6px; overflow:hidden; }
+thead th { background:#f8fafc; border-bottom:2px solid #e2e8f0; }
+thead th:first-child { text-align:left; padding:6px 10px; font-weight:700; color:#374151; }
+tbody tr:last-child td { border-bottom:none; }
+.legend { display:flex; gap:6px; flex-wrap:wrap; margin-top:14px; align-items:center; }
+.leg { padding:2px 8px; border-radius:4px; font-size:9px; font-weight:700; border:1px solid; letter-spacing:0.02em; }
+.today-badge { font-size:9px; font-weight:700; color:#1d4ed8; background:#dbeafe; padding:1px 6px; border-radius:10px; }
 @media print {
-  body { -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+  body { -webkit-print-color-adjust:exact; print-color-adjust:exact; padding:10px; }
+  .no-print { display:none; }
 }
 </style></head><body>
 <div class="header">
   <div>
     <div class="logo">SmartShift Pro</div>
-    <div class="meta">Griglia Turni &nbsp;·&nbsp; Stampata il ${today_str}</div>
+    <div class="subtitle">Pianificazione Turni Sanitari</div>
     <div class="period">${periodLabel.charAt(0).toUpperCase() + periodLabel.slice(1)}</div>
   </div>
+  <div class="print-date">Stampata il<br>${today_str}</div>
 </div>
 <table>
   <thead><tr>
-    <th style="text-align:left;padding:6px 8px;min-width:130px;border-right:2px solid #334155;">Dipendente</th>
+    <th style="text-align:left;padding:6px 10px;min-width:130px;border-right:2px solid #e2e8f0;color:#374151;font-size:10px;font-weight:700;">Nominativo</th>
     ${headers}
   </tr></thead>
   <tbody>${rows}</tbody>
 </table>
 <div class="legend">
-  <span class="leg" style="background:#78350f30;color:#fcd34d;border-color:#fcd34d50;">MAT Mattino</span>
-  <span class="leg" style="background:#7c2d1230;color:#fdba74;border-color:#fdba7450;">POM Pomeriggio</span>
-  <span class="leg" style="background:#31208130;color:#a5b4fc;border-color:#a5b4fc50;">NOT Notte</span>
-  <span class="leg" style="background:#4c1d9530;color:#c4b5fd;border-color:#c4b5fd50;">SMO Smonto</span>
-  <span class="leg" style="background:#05603a30;color:#6ee7b7;border-color:#6ee7b750;">FER Ferie</span>
-  <span class="leg" style="background:#7f1d1d30;color:#fca5a5;border-color:#fca5a550;">MAL Malattia</span>
+  <span style="font-size:9px;color:#6b7280;font-weight:600;margin-right:4px;">Legenda:</span>
+  <span class="leg" style="background:#fff9e6;color:#92400e;border-color:#f59e0b;">MAT Mattino</span>
+  <span class="leg" style="background:#fff3e0;color:#7c2d12;border-color:#f97316;">POM Pomeriggio</span>
+  <span class="leg" style="background:#ede9fe;color:#3b0764;border-color:#7c3aed;">NOT Notte</span>
+  <span class="leg" style="background:#f5f3ff;color:#4c1d95;border-color:#a78bfa;">SMO Smonto</span>
+  <span class="leg" style="background:#dcfce7;color:#14532d;border-color:#16a34a;">FER Ferie</span>
+  <span class="leg" style="background:#fee2e2;color:#7f1d1d;border-color:#dc2626;">MAL Malattia</span>
+  <span class="leg" style="background:#f1f5f9;color:#475569;border-color:#94a3b8;">RIP Riposo</span>
+  <span style="font-size:9px;color:#6b7280;margin-left:8px;">🔒 = turno manuale</span>
+  <span class="today-badge" style="margin-left:6px;">Oggi evidenziato in blu</span>
 </div>
 <script>window.onload = function(){ window.print(); }</script>
 </body></html>`;

@@ -546,6 +546,19 @@ def _genera_interno(data_inizio_str, giorni):
     # {dip_id: {'MATTINO': n, 'POMERIGGIO': n}}  aggiornato da crea()
     tipo_count: dict = {}
 
+    # ── MEMORIA PREGRESSA: pre-carica turni degli ultimi 30 gg prima di data_inizio ──
+    # Questo garantisce che la alternanza MAT/POM ricordi i mesi/settimane precedenti
+    # e che non si ripeta lo stesso turno per chi ha già accumulato squilibri.
+    _seed_start = (data_inizio - timedelta(days=30)).strftime('%Y-%m-%d')
+    _seed_end   = (data_inizio - timedelta(days=1)).strftime('%Y-%m-%d')
+    for _t in Turno.query.filter(
+        Turno.data >= _seed_start,
+        Turno.data <= _seed_end,
+        Turno.tipo.in_(['MATTINO', 'POMERIGGIO'])
+    ).all():
+        _tc = tipo_count.setdefault(_t.dipendente_id, {'MATTINO': 0, 'POMERIGGIO': 0})
+        _tc[_t.tipo] += 1
+
     # ── AUS 6-day block tracker (keyed by (dip_id, block6) where block6 = ordinal // 6) ──
     aus_riposi_6d:  dict = {}
     last_aus_block: int  = -1
@@ -1110,6 +1123,37 @@ def genera_giorno():
     result, err = _genera_interno(data_str, 1)
     if err: return jsonify({'errore': err}), 400
     result['modalita'] = 'giorno'
+    return jsonify(result)
+
+
+@api.route('/api/turni/pianifica_dipendente', methods=['POST'])
+def pianifica_dipendente():
+    """Pianifica i turni per un dipendente appena aggiunto a partire da oggi fino a fine mese."""
+    if 'user_id' not in session:
+        return jsonify({'errore': 'Non autenticato'}), 401
+    richiedente = db.session.get(Dipendente, session['user_id'])
+    if not richiedente or not richiedente.is_admin:
+        return jsonify({'errore': 'Non autorizzato'}), 403
+    req_data = request.json or {}
+    dip_id = req_data.get('dipendente_id')
+    if not dip_id:
+        return jsonify({'errore': 'dipendente_id richiesto'}), 400
+    dip = db.session.get(Dipendente, dip_id)
+    if not dip:
+        return jsonify({'errore': 'Dipendente non trovato'}), 404
+    # Genera da oggi fino a fine mese corrente
+    oggi = date.today()
+    import calendar as _cal
+    ultimo_giorno = _cal.monthrange(oggi.year, oggi.month)[1]
+    fine_mese = date(oggi.year, oggi.month, ultimo_giorno)
+    giorni_rimasti = (fine_mese - oggi).days + 1
+    if giorni_rimasti < 1:
+        giorni_rimasti = 1
+    result, err = _genera_interno(oggi.strftime('%Y-%m-%d'), giorni_rimasti)
+    if err:
+        return jsonify({'errore': err}), 400
+    result['dipendente'] = dip.nome
+    result['modalita'] = 'pianifica_dipendente'
     return jsonify(result)
 
 
