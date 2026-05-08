@@ -548,6 +548,8 @@ def _genera_interno(data_inizio_str, giorni):
     # Consecutive work & last-type trackers per OSS
     consec_work_days: dict = {}   # giorni lavorativi consecutivi per OSS
     last_two_tipos:   dict = {}   # ultimi 2 tipi MAT/POM assegnati per OSS
+    # Catena doppia notte: OSS che hanno fatto 2 notti consecutive e devono RIPOSO dopo SMONTO
+    doppia_notte_chain: set = set()
 
     # ── MEMORIA PREGRESSA: pre-carica turni degli ultimi 30 gg prima di data_inizio ──
     _seed_start = (data_inizio - timedelta(days=30)).strftime('%Y-%m-%d')
@@ -587,6 +589,18 @@ def _genera_interno(data_inizio_str, giorni):
                 key=lambda x: x[0]
             )
             last_two_tipos[_d7.id] = [s[1] for s in _mp7[-2:]]
+
+    # ── PRE-SEED doppia_notte_chain: OSS con SMONTO ieri che viene da 2 notti consecutive ──
+    # Caso: ieri=SMONTO, altroieri=NOTTE, ieri-2=NOTTE → oggi deve ricevere RIPOSO
+    _notte_m2 = {t.dipendente_id for t in Turno.query.filter_by(
+        data=(data_inizio - timedelta(days=2)).strftime('%Y-%m-%d'), tipo='NOTTE').all()}
+    _notte_m3 = {t.dipendente_id for t in Turno.query.filter_by(
+        data=(data_inizio - timedelta(days=3)).strftime('%Y-%m-%d'), tipo='NOTTE').all()}
+    _smonto_m1 = {t.dipendente_id for t in Turno.query.filter_by(
+        data=_seed_end, tipo='SMONTO').all()}
+    for _d in all_oss:
+        if _d.id in _smonto_m1 and _d.id in _notte_m2 and _d.id in _notte_m3:
+            doppia_notte_chain.add(_d.id)
 
     # ── Costanti copertura giornaliera OSS: minimo 3 MAT + 3 POM, massimo 4+4 ──
     MIN_MAT, MIN_POM, MAX_MAT, MAX_POM = 3, 3, 4, 4
@@ -673,10 +687,12 @@ def _genera_interno(data_inizio_str, giorni):
         ).all()
         assenti_ids = {a.dipendente_id for a in assenze_oggi}
 
-        # Night-chain tracking from yesterday
-        notte_ieri   = {t.dipendente_id for t in Turno.query.filter_by(data=ieri_str, tipo='NOTTE').all()}
-        smonto_ieri  = {t.dipendente_id for t in Turno.query.filter_by(data=ieri_str, tipo='SMONTO').all()}
-        riposo_ieri  = {t.dipendente_id for t in Turno.query.filter_by(data=ieri_str, tipo='RIPOSO').all()}
+        # Night-chain tracking from yesterday and the day before
+        avantieri_str  = (giorno - timedelta(days=2)).strftime('%Y-%m-%d')
+        notte_ieri     = {t.dipendente_id for t in Turno.query.filter_by(data=ieri_str,     tipo='NOTTE').all()}
+        notte_due_ieri = {t.dipendente_id for t in Turno.query.filter_by(data=avantieri_str, tipo='NOTTE').all()}
+        smonto_ieri    = {t.dipendente_id for t in Turno.query.filter_by(data=ieri_str,     tipo='SMONTO').all()}
+        riposo_ieri    = {t.dipendente_id for t in Turno.query.filter_by(data=ieri_str,     tipo='RIPOSO').all()}
 
         def crea(dip, tipo, ore_override=None, ora_inizio=''):
             nonlocal generati, saltati
@@ -736,15 +752,24 @@ def _genera_interno(data_inizio_str, giorni):
             else:
                 crea(dip, 'MATTINO', 7)
 
-        # ── 3. OSS Night chain: SMONTO (SMONTO alone; post-SMONTO RIPOSO in section 4) ──
+        # ── 3. OSS Night chain ──
+        # Catena 1 notte:  NOTTE → SMONTO (recupero, nessun RIPOSO forzato)
+        # Catena 2 notti:  NOTTE → NOTTE → SMONTO → RIPOSO (obbligatorio)
+        # Se ieri c'era NOTTE ma non altroieri → è la 1a notte: assegna 2a notte consecutiva.
+        # Se ieri c'era NOTTE E altroieri c'era NOTTE → 2 notti complete → SMONTO + marca RIPOSO.
         for dip in all_oss:
             if dip.id in gia: continue
             if dip.id in notte_ieri:
-                crea(dip, 'SMONTO')
-                # Fix A: SMONTO = recupero post-notte, conta come riposo settimanale.
-                # Questo evita che l'algoritmo cerchi UN ALTRO riposo nella stessa settimana,
-                # ma NON impedisce il RIPOSO post-SMONTO (Fix B lo gestisce con is_post_smonto).
-                oss_riposi_week[(dip.id, cal_week)] = True
+                if dip.id in notte_due_ieri:
+                    # Ha già fatto 2 notti consecutive → SMONTO oggi, RIPOSO domani
+                    crea(dip, 'SMONTO')
+                    doppia_notte_chain.add(dip.id)
+                    # Fix A: SMONTO conta come riposo settimanale (evita un 2° riposo cercato dalla sezione 4)
+                    oss_riposi_week[(dip.id, cal_week)] = True
+                else:
+                    # È la 1a notte → assegna la 2a notte consecutiva
+                    crea(dip, 'NOTTE')
+                    oss_notti_week[(dip.id, cal_week)] = True
 
         # ── 3b. Pre-reserve NOTTE candidate (exclude from regular shift pool) ──
         # Selecting the NOTTE worker BEFORE section 4 guarantees coverage even on Sunday
@@ -793,11 +818,14 @@ def _genera_interno(data_inizio_str, giorni):
         oss_rested     = []  # already have their RIPOSO this week
 
         for dip in oss_liberi:
-            # Fix B: post-SMONTO RIPOSO è sempre obbligatorio
-            is_post_smonto = dip.id in smonto_ieri
-            if is_post_smonto:
-                oss_must_rest.append(dip)
-                continue
+            # Fix B: RIPOSO obbligatorio SOLO dopo catena doppia NOTTE → SMONTO
+            if dip.id in smonto_ieri:
+                if dip.id in doppia_notte_chain:
+                    # 2 notti consecutive → RIPOSO obbligatorio
+                    doppia_notte_chain.discard(dip.id)
+                    oss_must_rest.append(dip)
+                    continue
+                # 1 sola notte → solo SMONTO (recupero), torna nel pool regolare
             # Regola 6 giorni: dopo 6 giorni lavorativi consecutivi riposo obbligatorio
             if consec_work_days.get(dip.id, 0) >= 6:
                 oss_must_rest.append(dip)
@@ -881,8 +909,8 @@ def _genera_interno(data_inizio_str, giorni):
         oss_must_rest_normali = [d for d in oss_must_rest if d.id not in smonto_ieri]
 
         for dip in oss_must_rest_smonto:
-            # Post-SMONTO RIPOSO è obbligatorio (catena NOTTE→SMONTO→RIPOSO).
-            # Il giorno prima era SMONTO (non RIPOSO), quindi non ci può essere un doppio riposo.
+            # RIPOSO obbligatorio dopo catena NOTTE→NOTTE→SMONTO (2 notti consecutive).
+            # Il giorno prima era SMONTO, quindi non ci può essere un doppio riposo.
             crea(dip, 'RIPOSO')
             oss_riposi_week[(dip.id, cal_week)] = True
             oss_rest_debt.discard(dip.id)
