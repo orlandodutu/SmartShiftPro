@@ -84,9 +84,9 @@ function PasswordChangeModal() {
               type="password"
               value={pw}
               onChange={(e) => setPw(e.target.value)}
-              placeholder="Minimo 6 caratteri"
+              placeholder="Minimo 4 caratteri"
               required
-              minLength={6}
+              minLength={4}
               className="bg-black/20 border-white/10 focus:border-amber-400"
             />
           </div>
