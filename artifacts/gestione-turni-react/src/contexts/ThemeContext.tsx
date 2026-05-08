@@ -7,11 +7,21 @@ interface ThemeContextType {
   toggleTheme: () => void;
 }
 
-const ThemeContext = createContext<ThemeContextType>({ theme: "dark", toggleTheme: () => {} });
+const THEME_KEY    = "ss-theme";
+const THEME_VER    = "ss-theme-v";
+const CURRENT_VER  = "2";
+
+const ThemeContext = createContext<ThemeContextType>({ theme: "light", toggleTheme: () => {} });
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const [theme, setTheme] = useState<Theme>(() => {
-    return (localStorage.getItem("ss-theme") as Theme) ?? "dark";
+    const savedVer = localStorage.getItem(THEME_VER);
+    if (savedVer !== CURRENT_VER) {
+      localStorage.setItem(THEME_KEY, "light");
+      localStorage.setItem(THEME_VER, CURRENT_VER);
+      return "light";
+    }
+    return (localStorage.getItem(THEME_KEY) as Theme) ?? "light";
   });
 
   useEffect(() => {
@@ -21,7 +31,8 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     } else {
       root.removeAttribute("data-theme");
     }
-    localStorage.setItem("ss-theme", theme);
+    localStorage.setItem(THEME_KEY, theme);
+    localStorage.setItem(THEME_VER, CURRENT_VER);
   }, [theme]);
 
   const toggleTheme = () => setTheme((t) => (t === "dark" ? "light" : "dark"));
