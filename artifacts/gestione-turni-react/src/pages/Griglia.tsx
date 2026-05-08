@@ -1,4 +1,5 @@
 import { useEffect, useState, useMemo, useCallback } from "react";
+import { useTheme } from "@/contexts/ThemeContext";
 import { Turno, Dipendente } from "@/lib/api";
 import { RoleBadge } from "@/components/ui/RoleBadge";
 import { Button } from "@/components/ui/button";
@@ -210,6 +211,8 @@ function ShiftEditDialog({
 export default function Griglia() {
   const { toast } = useToast();
   const { user } = useAuth();
+  const { theme } = useTheme();
+  const isLight = theme === "light";
   const today = new Date().toISOString().split("T")[0];
   const canEdit = !!(user?.is_admin || user?.ruolo === "CAPOSALA");
 
@@ -419,7 +422,7 @@ tbody td { border-bottom:1px solid #1e293b; vertical-align:middle; }
               title="Vista scorrevole"
               className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 ${
                 layout === "scorrevole"
-                  ? "bg-amber-500/20 text-amber-400 border border-amber-500/30"
+                  ? isLight ? "bg-emerald-500/15 text-emerald-700 border border-emerald-500/30" : "bg-amber-500/20 text-amber-400 border border-amber-500/30"
                   : "text-muted-foreground hover:text-foreground"
               }`}
             >
@@ -431,7 +434,7 @@ tbody td { border-bottom:1px solid #1e293b; vertical-align:middle; }
               title="Vista a griglia"
               className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 ${
                 layout === "griglia"
-                  ? "bg-amber-500/20 text-amber-400 border border-amber-500/30"
+                  ? isLight ? "bg-emerald-500/15 text-emerald-700 border border-emerald-500/30" : "bg-amber-500/20 text-amber-400 border border-amber-500/30"
                   : "text-muted-foreground hover:text-foreground"
               }`}
             >
@@ -448,7 +451,7 @@ tbody td { border-bottom:1px solid #1e293b; vertical-align:middle; }
                 onClick={() => { setViewMode(m); setAnchorDate(m === "settimana" ? getMonday(today) : monthStart(today)); }}
                 className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all capitalize ${
                   viewMode === m
-                    ? "bg-amber-500/20 text-amber-400 border border-amber-500/30"
+                    ? isLight ? "bg-emerald-500/15 text-emerald-700 border border-emerald-500/30" : "bg-amber-500/20 text-amber-400 border border-amber-500/30"
                     : "text-muted-foreground hover:text-foreground"
                 }`}
               >
@@ -511,7 +514,7 @@ tbody td { border-bottom:1px solid #1e293b; vertical-align:middle; }
           <table className="w-full min-w-max border-collapse text-xs">
             <thead>
               <tr className="border-b border-white/8 bg-white/3">
-                <th className="sticky left-0 z-20 bg-[#0c1428] px-4 py-3 text-left font-bold text-muted-foreground text-[10px] uppercase tracking-wide min-w-[130px] border-r border-white/6">
+                <th className="sticky left-0 z-20 px-4 py-3 text-left font-bold text-muted-foreground text-[10px] uppercase tracking-wide min-w-[130px] border-r border-white/6" style={{ background: "var(--sticky-col-bg)" }}>
                   Dipendente
                 </th>
                 {dates.map((d) => {
@@ -531,7 +534,7 @@ tbody td { border-bottom:1px solid #1e293b; vertical-align:middle; }
             <tbody>
               {sortedDip.map((dip, idx) => (
                 <tr key={dip.id} className={`border-b border-white/4 last:border-b-0 ${idx % 2 === 0 ? "bg-white/0" : "bg-white/[0.015]"}`}>
-                  <td className="sticky left-0 z-10 bg-[#0c1428] px-4 py-2.5 border-r border-white/6">
+                  <td className="sticky left-0 z-10 px-4 py-2.5 border-r border-white/6" style={{ background: "var(--sticky-col-bg)" }}>
                     <div className="flex items-center gap-2">
                       <div className="min-w-0">
                         <p className="font-semibold text-foreground text-[11px] leading-tight truncate max-w-[90px]">{dip.nome}</p>

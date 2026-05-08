@@ -22,7 +22,8 @@ const PREF_OPTIONS: { key: Pref; label: string; icon: typeof Sun; color: string 
   { key: "NOTTE",      label: "Notte",      icon: BedDouble, color: "bg-indigo-500/15 text-indigo-300 border-indigo-500/30" },
 ];
 
-const CRYSTAL = "linear-gradient(155deg, #B8860B 0%, #FFBF00 38%, #FFE566 52%, #FFBF00 75%, #B8860B 100%)";
+const CRYSTAL = "var(--btn-primary-bg)";
+const CRYSTAL_COLOR = "var(--btn-primary-color)";
 const RUOLI = ["OSS", "INFERMIERA", "AUSILIARIO", "CAPOSALA"] as const;
 
 function formatDate(d: string) {
@@ -418,7 +419,7 @@ export default function Caposala() {
                 type="submit"
                 disabled={assenzaLoading || !assenzaForm.dipendente_id}
                 className="w-full h-11 rounded-xl font-bold text-sm uppercase tracking-widest transition-all disabled:opacity-50 glow-gold"
-                style={{ background: CRYSTAL, color: "#0f172a" }}
+                style={{ background: CRYSTAL, color: CRYSTAL_COLOR }}
               >
                 {assenzaLoading ? "Salvataggio..." : "Registra e aggiorna turni"}
               </button>
@@ -708,7 +709,7 @@ export default function Caposala() {
                 onClick={() => setShowAdd(false)}>Annulla</Button>
               <button type="submit" disabled={addLoading}
                 className="flex-1 py-2 rounded-xl font-bold text-sm glow-gold disabled:opacity-50"
-                style={{ background: CRYSTAL, color: "#0f172a" }}
+                style={{ background: CRYSTAL, color: CRYSTAL_COLOR }}
                 data-testid="confirm-aggiungi">
                 {addLoading ? "Salvataggio..." : "Aggiungi"}
               </button>

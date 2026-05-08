@@ -128,8 +128,8 @@ export default function Login() {
             data-testid="login-submit"
             className="w-full mt-2 h-12 rounded-xl font-bold text-sm uppercase tracking-widest transition-all disabled:opacity-60 glow-gold"
             style={{
-              background: "linear-gradient(155deg, #B8860B 0%, #FFBF00 38%, #FFE566 52%, #FFBF00 75%, #B8860B 100%)",
-              color: "#0f172a",
+              background: "var(--btn-primary-bg)",
+              color: "var(--btn-primary-color)",
             }}
           >
             {loading ? "Accesso..." : "Accedi"}
