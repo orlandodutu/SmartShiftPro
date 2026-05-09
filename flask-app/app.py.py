@@ -1,4 +1,4 @@
-from flask import Flask, jsonify, request, send_file, render_template, session, redirect, url_for, Blueprint
+from flask import Flask, jsonify, request, send_file, send_from_directory, render_template, session, redirect, url_for, Blueprint
 from flask_cors import CORS
 from flask_sqlalchemy import SQLAlchemy
 from reportlab.lib.pagesizes import A4
@@ -14,6 +14,7 @@ app.secret_key = os.environ.get('SESSION_SECRET', 'turni-segreto-2024')
 CORS(app, supports_credentials=True, origins='*')
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+FRONTEND_DIST = os.path.abspath(os.path.join(BASE_DIR, '..', 'artifacts', 'gestione-turni-react', 'dist', 'public'))
 _raw_db_url = os.environ.get('DATABASE_URL', '')
 if _raw_db_url.startswith('postgres://'):
     _raw_db_url = _raw_db_url.replace('postgres://', 'postgresql://', 1)
@@ -22,19 +23,25 @@ app.config['SQLALCHEMY_DATABASE_URI'] = (
 )
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(days=30)
-# Riconnessione automatica se il server PostgreSQL chiude la connessione
-app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
-    'pool_pre_ping': True,       # testa la connessione prima di usarla
-    'pool_recycle': 300,         # ricicla le connessioni ogni 5 minuti
-    'pool_size': 5,
-    'max_overflow': 10,
-    'connect_args': {'connect_timeout': 10},
+_engine_options = {
+    'pool_pre_ping': True,
+    'pool_recycle': 300,
 }
-
+if app.config['SQLALCHEMY_DATABASE_URI'].startswith('postgresql://'):
+    _engine_options.update({
+        'pool_size': 5,
+        'max_overflow': 10,
+    })
+app.config['SQLALCHEMY_ENGINE_OPTIONS'] = _engine_options
 db = SQLAlchemy(app)
 
 # Blueprint for React frontend — all routes at /flask-api/api/...
 api = Blueprint('api', __name__)
+
+
+@api.route('/api/health', methods=['GET'])
+def health():
+    return jsonify({'ok': True})
 
 
 # --- MODELLI DATABASE ---
@@ -130,6 +137,7 @@ def inizializza_staff():
         ("Fabiana",    "AUSILIARIO", False),
         ("Marina",     "AUSILIARIO", False),
         ("Angela",     "AUSILIARIO", False),
+        ("Orlando",     "AUSILIARIO", False),
         ("Carmen",     "OSS",        False),
         ("Roberto",    "OSS",        False),
         ("Barbara",    "OSS",        False),
@@ -140,14 +148,20 @@ def inizializza_staff():
         ("Ioana",      "OSS",        False),
         ("Elena",      "OSS",        False),
     ]
-    if Dipendente.query.first() is None:
-        # Prima installazione: crea Giustina + tutto lo staff
+    if Dipendente.query.filter_by(nome='Giustina').first() is None:
         giustina = Dipendente(nome='Giustina', ruolo='DEV', is_admin=True, password='')
         db.session.add(giustina)
-        for nome, ruolo, is_admin in staff_base:
+    for nome, ruolo, is_admin in staff_base:
+        if Dipendente.query.filter_by(nome=nome).first() is None:
             db.session.add(Dipendente(nome=nome, ruolo=ruolo, is_admin=is_admin, password=''))
+    db.session.commit()
+    if Dipendente.query.count() == len(staff_base) + 1:
+        for nome, ruolo, is_admin in staff_base:
+            dip = Dipendente.query.filter_by(nome=nome).first()
+            if dip:
+                dip.ruolo = ruolo
+                dip.is_admin = is_admin
         db.session.commit()
-        print("Staff inizializzato con Giustina come unica admin.")
 
 
 # ==========================================
@@ -373,7 +387,10 @@ def get_turni():
     data_fine    = request.args.get('data_fine')
 
     includi_archivio = request.args.get('archivio', 'false').lower() == 'true'
-    query = Turno.query
+    query = Turno.query.join(Dipendente).filter(
+        Dipendente.nome != 'Giustina',
+        Dipendente.ruolo != 'DEV',
+    )
     if not includi_archivio:
         query = query.filter(db.or_(Turno.archivio_mese == '', Turno.archivio_mese.is_(None)))
     if mese and anno:
@@ -483,7 +500,11 @@ def elimina_turno(id):
 
 @api.route('/api/statistiche', methods=['GET'])
 def statistiche():
-    dipendenti = Dipendente.query.filter(Dipendente.ruolo != 'CAPOSALA').all()
+    dipendenti = Dipendente.query.filter(
+        Dipendente.ruolo != 'CAPOSALA',
+        Dipendente.ruolo != 'DEV',
+        Dipendente.nome != 'Giustina',
+    ).all()
     return jsonify([{
         'id': d.id, 'nome': d.nome, 'ruolo': d.ruolo,
         'ore_totali': d.ore_totali, 'notti_fatte': d.notti_fatte,
@@ -536,6 +557,8 @@ def _genera_interno(data_inizio_str, giorni):
     # Consecutive work & last-type trackers per OSS
     consec_work_days: dict = {}   # giorni lavorativi consecutivi per OSS
     last_two_tipos:   dict = {}   # ultimi 2 tipi MAT/POM assegnati per OSS
+    current_day = None
+    tipo_days: dict = {}
     # Catena doppia notte: OSS che hanno fatto 2 notti consecutive e devono RIPOSO dopo SMONTO
     doppia_notte_chain: set = set()
 
@@ -549,6 +572,7 @@ def _genera_interno(data_inizio_str, giorni):
     ).all():
         _tc = tipo_count.setdefault(_t.dipendente_id, {'MATTINO': 0, 'POMERIGGIO': 0})
         _tc[_t.tipo] += 1
+        tipo_days.setdefault(_t.dipendente_id, {}).setdefault(_t.tipo, set()).add(_t.data)
 
     # ── PRE-SEED 7 gg: inizializza consecutivi e ultimi 2 tipi per OSS ──
     _seed7_start  = (data_inizio - timedelta(days=7)).strftime('%Y-%m-%d')
@@ -596,7 +620,15 @@ def _genera_interno(data_inizio_str, giorni):
     def _can_tipo(dip, tipo):
         """Verifica che assegnare questo tipo non violi la regola dei 2 consecutivi dello stesso tipo."""
         ltt = last_two_tipos.get(dip.id, [])
-        return len(ltt) < 2 or not (ltt[-2] == tipo and ltt[-1] == tipo)
+        if len(ltt) >= 2 and ltt[-2] == tipo and ltt[-1] == tipo:
+            return False
+        if current_day is not None:
+            for back in range(1, 4):
+                day = (current_day - timedelta(days=back)).strftime('%Y-%m-%d')
+                if day not in tipo_days.get(dip.id, {}).get(tipo, set()):
+                    return True
+            return False
+        return True
 
     def _scegli_tipo(dip, m, p, prefers_pom):
         """Restituisce 'MATTINO', 'POMERIGGIO' o None rispettando consecutivi e cap 4+4."""
@@ -616,12 +648,23 @@ def _genera_interno(data_inizio_str, giorni):
         if can_m: return 'MATTINO'
         return 'POMERIGGIO' if can_p else None
 
+    def _track_mat_pom(dip, tipo):
+        if tipo in ('MATTINO', 'POMERIGGIO'):
+            tc = tipo_count.setdefault(dip.id, {'MATTINO': 0, 'POMERIGGIO': 0})
+            tc[tipo] += 1
+            _ltt = last_two_tipos.setdefault(dip.id, [])
+            _ltt.append(tipo)
+            last_two_tipos[dip.id] = _ltt[-2:]
+            if current_day is not None:
+                tipo_days.setdefault(dip.id, {}).setdefault(tipo, set()).add(current_day.strftime('%Y-%m-%d'))
+
     # ── AUS 6-day block tracker (keyed by (dip_id, block6) where block6 = ordinal // 6) ──
     aus_riposi_6d:  dict = {}
     last_aus_block: int  = -1
 
     for i in range(giorni):
         giorno   = data_inizio + timedelta(days=i)
+        current_day = giorno
         data_str = giorno.strftime('%Y-%m-%d')
         ieri_str = (giorno - timedelta(days=1)).strftime('%Y-%m-%d')
         weekday  = giorno.weekday()  # 0=Mon…6=Sun
@@ -699,20 +742,12 @@ def _genera_interno(data_inizio_str, giorni):
             if tipo == 'NOTTE':    dip.notti_fatte += 1
             elif tipo == 'FERIE':  dip.ferie       += 1
             elif tipo == 'MALATTIA': dip.malattia  += 1
-            # Track MAT/POM balance per employee for alternation
-            if tipo in ('MATTINO', 'POMERIGGIO'):
-                tc = tipo_count.setdefault(dip.id, {'MATTINO': 0, 'POMERIGGIO': 0})
-                tc[tipo] += 1
+            _track_mat_pom(dip, tipo)
             # Aggiorna tracker giorni consecutivi
             if tipo in ('MATTINO', 'POMERIGGIO', 'NOTTE'):
                 consec_work_days[dip.id] = consec_work_days.get(dip.id, 0) + 1
             else:
                 consec_work_days[dip.id] = 0
-            # Aggiorna last 2 tipi MAT/POM
-            if tipo in ('MATTINO', 'POMERIGGIO'):
-                _ltt = last_two_tipos.setdefault(dip.id, [])
-                _ltt.append(tipo)
-                last_two_tipos[dip.id] = _ltt[-2:]
             generati += 1
             return True
 
@@ -730,6 +765,9 @@ def _genera_interno(data_inizio_str, giorni):
         # la domenica lavora per evitare due riposi consecutivi.
         for dip in infermieri:
             if dip.id in gia: continue
+            if consec_work_days.get(dip.id, 0) >= 3:
+                crea(dip, 'RIPOSO')
+                continue
             if weekday == 6:
                 if dip.id in riposo_ieri:
                     crea(dip, 'MATTINO', 7)   # ieri già riposo → lavora domenica
@@ -871,10 +909,14 @@ def _genera_interno(data_inizio_str, giorni):
                 if i == giorni - 1 and dip.id in oss_rest_debt:
                     continue
                 if m_c < MIN_MAT:
+                    if not _can_tipo(dip, 'MATTINO'):
+                        continue
                     oss_must_rest.remove(dip)
                     crea(dip, 'MATTINO');    m_c += 1
                     oss_rest_debt.add(dip.id)
                 elif m_c >= MIN_MAT and p_c < MIN_POM:
+                    if not _can_tipo(dip, 'POMERIGGIO'):
+                        continue
                     oss_must_rest.remove(dip)
                     crea(dip, 'POMERIGGIO'); p_c += 1
                     oss_rest_debt.add(dip.id)
@@ -916,8 +958,7 @@ def _genera_interno(data_inizio_str, giorni):
                 prefers_pom = tc['MATTINO'] > tc['POMERIGGIO']
                 tipo = _scegli_tipo(dip, m_c, p_c, prefers_pom)
                 if tipo is None:
-                    # Fallback: rispetta _can_tipo anche quando l'alternativa non è disponibile
-                    tipo = 'POMERIGGIO' if _can_tipo(dip, 'POMERIGGIO') else 'MATTINO'
+                    continue
                 crea(dip, tipo)
                 if tipo == 'MATTINO':      m_c += 1
                 elif tipo == 'POMERIGGIO': p_c += 1
@@ -1018,6 +1059,8 @@ def _genera_interno(data_inizio_str, giorni):
             for dip in candidati_dop:
                 if p_c >= MIN_POM:
                     break
+                if not _can_tipo(dip, 'POMERIGGIO'):
+                    continue
                 ore_p = ORE_MAP['POMERIGGIO']
                 db.session.add(Turno(
                     dipendente_id=dip.id, data=data_str, tipo='POMERIGGIO',
@@ -1025,6 +1068,7 @@ def _genera_interno(data_inizio_str, giorni):
                 ))
                 dip.ore_totali += ore_p
                 ore_corrente[dip.id] = ore_corrente.get(dip.id, 0) + ore_p
+                _track_mat_pom(dip, 'POMERIGGIO')
                 generati += 1
                 p_c += 1
 
@@ -1044,6 +1088,8 @@ def _genera_interno(data_inizio_str, giorni):
             for dip in candidati_mat:
                 if m_c >= MIN_MAT:
                     break
+                if not _can_tipo(dip, 'MATTINO'):
+                    continue
                 ore_m = ORE_MAP['MATTINO']
                 db.session.add(Turno(
                     dipendente_id=dip.id, data=data_str, tipo='MATTINO',
@@ -1051,6 +1097,7 @@ def _genera_interno(data_inizio_str, giorni):
                 ))
                 dip.ore_totali += ore_m
                 ore_corrente[dip.id] = ore_corrente.get(dip.id, 0) + ore_m
+                _track_mat_pom(dip, 'MATTINO')
                 generati += 1
                 m_c += 1
 
@@ -1067,11 +1114,7 @@ def _genera_interno(data_inizio_str, giorni):
                 prefers_pom = tc['MATTINO'] > tc['POMERIGGIO']
                 tipo = _scegli_tipo(dip, m_c, p_c, prefers_pom)
                 if tipo is None:
-                    # Fallback emergenza: rispetta _can_tipo dove possibile
-                    if m_c < MIN_MAT:
-                        tipo = 'MATTINO' if _can_tipo(dip, 'MATTINO') else 'POMERIGGIO'
-                    else:
-                        tipo = 'POMERIGGIO' if _can_tipo(dip, 'POMERIGGIO') else 'MATTINO'
+                    continue
                 crea(dip, tipo)
                 if tipo == 'MATTINO':      m_c += 1
                 elif tipo == 'POMERIGGIO': p_c += 1
@@ -1105,6 +1148,8 @@ def _genera_interno(data_inizio_str, giorni):
                 if gap <= 3:
                     continue
                 if dip.id in mat_ids_4d and dip.id not in pom_ids_4d:
+                    if not _can_tipo(dip, 'POMERIGGIO'):
+                        continue
                     ore_p = ORE_MAP['POMERIGGIO']
                     db.session.add(Turno(
                         dipendente_id=dip.id, data=data_str, tipo='POMERIGGIO',
@@ -1112,8 +1157,11 @@ def _genera_interno(data_inizio_str, giorni):
                     ))
                     dip.ore_totali += ore_p
                     ore_corrente[dip.id] = ore_corrente.get(dip.id, 0) + ore_p
+                    _track_mat_pom(dip, 'POMERIGGIO')
                     generati += 1
                 elif dip.id in pom_ids_4d and dip.id not in mat_ids_4d:
+                    if not _can_tipo(dip, 'MATTINO'):
+                        continue
                     ore_m = ORE_MAP['MATTINO']
                     db.session.add(Turno(
                         dipendente_id=dip.id, data=data_str, tipo='MATTINO',
@@ -1121,6 +1169,7 @@ def _genera_interno(data_inizio_str, giorni):
                     ))
                     dip.ore_totali += ore_m
                     ore_corrente[dip.id] = ore_corrente.get(dip.id, 0) + ore_m
+                    _track_mat_pom(dip, 'MATTINO')
                     generati += 1
 
         # ── 5. Ausiliari: 07–15, exactly 1 RIPOSO every 6 days (block-based) ──
@@ -1137,6 +1186,12 @@ def _genera_interno(data_inizio_str, giorni):
 
         for dip in aus_libere:
             ha_riposato = aus_riposi_6d.get((dip.id, aus_block), False)
+            if dip.nome == 'Orlando' and weekday == 6:
+                aus_must_rest.append(dip)
+                continue
+            if consec_work_days.get(dip.id, 0) >= 3:
+                aus_must_rest.append(dip)
+                continue
             if ha_riposato:
                 aus_workers.append(dip)
                 continue
@@ -1149,13 +1204,23 @@ def _genera_interno(data_inizio_str, giorni):
 
         # Ensure at least 1 ausiliario works each day
         if not aus_workers and aus_must_rest:
-            aus_workers.append(aus_must_rest.pop())
+            fallback_aus = next(
+                (d for d in reversed(aus_must_rest) if not (d.nome == 'Orlando' and weekday == 6)),
+                None
+            )
+            if fallback_aus:
+                aus_must_rest.remove(fallback_aus)
+                aus_workers.append(fallback_aus)
 
         for dip in aus_workers:
             ora = AUSILIARIO_ORARI.get(dip.nome, '07:00')
             crea(dip, 'MATTINO', AUSILIARIO_ORE, ora_inizio=ora)
 
         for dip in aus_must_rest:
+            if dip.nome == 'Orlando' and weekday == 6:
+                crea(dip, 'RIPOSO')
+                aus_riposi_6d[(dip.id, aus_block)] = True
+                continue
             if dip.id in riposo_ieri:
                 # Ieri era già RIPOSO: evita due riposi consecutivi → lavora oggi.
                 ora = AUSILIARIO_ORARI.get(dip.nome, '07:00')
@@ -1789,14 +1854,23 @@ app.register_blueprint(api, url_prefix='/flask-api')
 # Also keep legacy routes for the HTML template frontend
 @app.route('/')
 def index():
+    react_index = os.path.join(FRONTEND_DIST, 'index.html')
+    if os.path.exists(react_index):
+        return send_from_directory(FRONTEND_DIST, 'index.html')
     return redirect('/login')
 
 @app.route('/login')
 def login_page():
+    react_index = os.path.join(FRONTEND_DIST, 'index.html')
+    if os.path.exists(react_index):
+        return send_from_directory(FRONTEND_DIST, 'index.html')
     return render_template('login.html')
 
 @app.route('/dashboard')
 def dashboard():
+    react_index = os.path.join(FRONTEND_DIST, 'index.html')
+    if os.path.exists(react_index):
+        return send_from_directory(FRONTEND_DIST, 'index.html')
     if 'user_id' not in session:
         return redirect('/login')
     user = Dipendente.query.get(session['user_id'])
@@ -1804,6 +1878,9 @@ def dashboard():
 
 @app.route('/turni')
 def turni_page():
+    react_index = os.path.join(FRONTEND_DIST, 'index.html')
+    if os.path.exists(react_index):
+        return send_from_directory(FRONTEND_DIST, 'index.html')
     if 'user_id' not in session:
         return redirect('/login')
     user = Dipendente.query.get(session['user_id'])
@@ -1815,6 +1892,20 @@ def staff_page():
         return redirect('/login')
     user = Dipendente.query.get(session['user_id'])
     return render_template('staff.html', user=user)
+
+@app.route('/assets/<path:filename>')
+def react_assets(filename):
+    return send_from_directory(os.path.join(FRONTEND_DIST, 'assets'), filename)
+
+@app.route('/genera')
+@app.route('/caposala')
+@app.route('/griglia')
+@app.route('/archivio')
+def react_spa_routes():
+    react_index = os.path.join(FRONTEND_DIST, 'index.html')
+    if os.path.exists(react_index):
+        return send_from_directory(FRONTEND_DIST, 'index.html')
+    return redirect('/login')
 
 # Legacy API routes for HTML templates
 @app.route('/api/login', methods=['POST'])
@@ -1872,7 +1963,10 @@ def legacy_elimina_dipendente(id):
 @app.route('/api/turni', methods=['GET'])
 def legacy_get_turni():
     mese, anno, dip_id = request.args.get('mese'), request.args.get('anno'), request.args.get('dipendente_id')
-    query = Turno.query
+    query = Turno.query.join(Dipendente).filter(
+        Dipendente.nome != 'Giustina',
+        Dipendente.ruolo != 'DEV',
+    )
     if mese and anno: query = query.filter(Turno.data.like(f"{anno}-{mese.zfill(2)}%"))
     if dip_id: query = query.filter_by(dipendente_id=dip_id)
     return jsonify([t.to_dict() for t in query.order_by(Turno.data).all()])
@@ -1943,10 +2037,6 @@ def startup_init():
                 conn.execute(text("ALTER TABLE turno ADD COLUMN archivio_mese VARCHAR(7) DEFAULT ''"))
             conn.execute(text("UPDATE dipendente SET ruolo='AUSILIARIO' WHERE ruolo='PULIZIE'"))
             # ── Migrazione Giustina: rimuovi vecchi admin e dipendenti obsoleti ──
-            # Elimina Orlando dal DB (sostituito da Giustina come unica admin)
-            conn.execute(text("DELETE FROM turno WHERE dipendente_id IN (SELECT id FROM dipendente WHERE LOWER(nome)='orlando')"))
-            conn.execute(text("DELETE FROM assenza WHERE dipendente_id IN (SELECT id FROM dipendente WHERE LOWER(nome)='orlando')"))
-            conn.execute(text("DELETE FROM dipendente WHERE LOWER(nome)='orlando'"))
             # Rimuovi is_admin da Caposala se esiste (non è più admin)
             conn.execute(text("UPDATE dipendente SET is_admin=false WHERE LOWER(nome)='caposala'"))
             # Crea Giustina se non esiste

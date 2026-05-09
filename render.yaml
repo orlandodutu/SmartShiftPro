@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: smartshift-pro
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt && corepack enable && corepack pnpm install --ignore-scripts && cd artifacts/gestione-turni-react && PORT=5173 BASE_PATH=/ corepack pnpm exec vite build --config vite.config.ts
+    startCommand: gunicorn --chdir flask-app wsgi:app
+    envVars:
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: MASTER_PASSWORD
+        sync: false
+      - key: PYTHON_VERSION
+        value: 3.11.9

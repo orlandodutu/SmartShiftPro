@@ -49,6 +49,25 @@ export default function Genera() {
   const [periodoLoading, setPeriodoLoading] = useState(false);
   const [periodoConfirm, setPeriodoConfirm] = useState("");
 
+  const openCancellaGiorno = () => {
+    setPeriodoInizio(dataInizio);
+    setPeriodoFine(dataInizio);
+    setPeriodoConfirm("");
+    setPeriodoOpen(true);
+  };
+
+  const openCancellaSettimana = () => {
+    const start = new Date(dataInizio + "T00:00:00");
+    const day = start.getDay();
+    start.setDate(start.getDate() + (day === 0 ? -6 : 1 - day));
+    const end = new Date(start);
+    end.setDate(start.getDate() + 6);
+    setPeriodoInizio(start.toISOString().split("T")[0]);
+    setPeriodoFine(end.toISOString().split("T")[0]);
+    setPeriodoConfirm("");
+    setPeriodoOpen(true);
+  };
+
   const handleGenera = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
@@ -259,12 +278,26 @@ export default function Genera() {
                 I turni manuali 🔒 vengono preservati. Usa per ricalcolare una settimana o un periodo sbagliato.
               </p>
             </div>
-            <Button
-              variant="outline"
-              onClick={() => { setPeriodoOpen(true); setPeriodoInizio(today); setPeriodoFine(today); setPeriodoConfirm(""); }}
-              className="shrink-0 border-orange-500/30 text-orange-400 hover:bg-orange-500/10 min-h-[44px]">
-              <Trash2 className="h-4 w-4 mr-2" />Cancella Periodo
-            </Button>
+            <div className="flex gap-2 flex-wrap">
+              <Button
+                variant="outline"
+                onClick={openCancellaGiorno}
+                className="shrink-0 border-orange-500/30 text-orange-400 hover:bg-orange-500/10 min-h-[44px]">
+                <Trash2 className="h-4 w-4 mr-2" />Giorno
+              </Button>
+              <Button
+                variant="outline"
+                onClick={openCancellaSettimana}
+                className="shrink-0 border-orange-500/30 text-orange-400 hover:bg-orange-500/10 min-h-[44px]">
+                <CalendarDays className="h-4 w-4 mr-2" />Settimana
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => { setPeriodoOpen(true); setPeriodoInizio(today); setPeriodoFine(today); setPeriodoConfirm(""); }}
+                className="shrink-0 border-orange-500/30 text-orange-400 hover:bg-orange-500/10 min-h-[44px]">
+                <Trash2 className="h-4 w-4 mr-2" />Periodo
+              </Button>
+            </div>
           </div>
         </div>
       )}
