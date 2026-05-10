@@ -612,6 +612,7 @@ def _genera_interno(data_inizio_str, giorni):
     tipo_days = {}
     consec_work = {d.id: 0 for d in all_dip}
     doppi_count = {d.id: 0 for d in all_dip}
+    notti_periodo = {d.id: 0 for d in oss_notturni}
 
     def has_shift(dip, data_str, tipo=None):
         q = Turno.query.filter_by(dipendente_id=dip.id, data=data_str)
@@ -665,6 +666,7 @@ def _genera_interno(data_inizio_str, giorni):
             ore_corrente[dip.id] = ore_corrente.get(dip.id, 0) + ore
         if tipo == 'NOTTE':
             dip.notti_fatte += 1
+            notti_periodo[dip.id] = notti_periodo.get(dip.id, 0) + 1
         track(dip, tipo, giorno)
         generati += 1
         return True
@@ -723,7 +725,7 @@ def _genera_interno(data_inizio_str, giorni):
 
         notte_riserva_id = None
         if not ids_today(giorno, 'NOTTE') and oss_notturni:
-            night_pool = sorted([d for d in oss_notturni if d.id not in assenti_ids and not has_shift(d, data_str)], key=lambda d: (d.notti_fatte or 0, ore_corrente.get(d.id, 0)))
+            night_pool = sorted([d for d in oss_notturni if d.id not in assenti_ids and not has_shift(d, data_str)], key=lambda d: (notti_periodo.get(d.id, 0), d.notti_fatte or 0, ore_corrente.get(d.id, 0)))
             if night_pool:
                 notte_riserva_id = night_pool[0].id
 
@@ -758,7 +760,7 @@ def _genera_interno(data_inizio_str, giorni):
                 p_c += 1
 
         if not ids_today(giorno, 'NOTTE') and oss_notturni:
-            night_pool = sorted([d for d in oss_notturni if d.id == notte_riserva_id or (d.id not in assenti_ids and not has_shift(d, data_str))], key=lambda d: (d.id != notte_riserva_id, d.notti_fatte or 0, ore_corrente.get(d.id, 0)))
+            night_pool = sorted([d for d in oss_notturni if d.id == notte_riserva_id or (d.id not in assenti_ids and not has_shift(d, data_str))], key=lambda d: (d.id != notte_riserva_id, notti_periodo.get(d.id, 0), d.notti_fatte or 0, ore_corrente.get(d.id, 0)))
             if night_pool:
                 crea(night_pool[0], 'NOTTE', giorno)
             else:
