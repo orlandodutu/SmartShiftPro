@@ -158,7 +158,7 @@ export default function Genera() {
 
   const MODALITA_LABELS: Record<Modalita, string> = {
     settimana: "1 Settimana (7 giorni)",
-    mese: "1 Mese (30 giorni)",
+    mese: "1 Mese (giorni reali)",
     giorno: "Giorno Singolo",
   };
 
@@ -210,7 +210,7 @@ export default function Genera() {
                       <span className="flex items-center gap-2"><CalendarDays className="h-4 w-4 text-amber-400" />Giorno Singolo</span>
                     </SelectItem>
                     <SelectItem value="settimana">1 Settimana (7 giorni)</SelectItem>
-                    <SelectItem value="mese">1 Mese (30 giorni)</SelectItem>
+                    <SelectItem value="mese">1 Mese (giorni reali)</SelectItem>
                   </SelectContent>
                 </Select>
               </div>

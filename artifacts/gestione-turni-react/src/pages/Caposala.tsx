@@ -224,16 +224,16 @@ export default function Caposala() {
     }
     setEditLoading(true);
     try {
-      const [ruoloRes, prefRes] = await Promise.all([
-        fetch(`/flask-api/api/dipendenti/${editDip.id}`, {
-          method: "PUT", headers: { "Content-Type": "application/json" }, credentials: "include",
-          body: JSON.stringify({ ruolo: editRuolo }),
-        }),
-        fetch(`/flask-api/api/dipendenti/${editDip.id}/preferenze`, {
-          method: "PUT", headers: { "Content-Type": "application/json" }, credentials: "include",
-          body: JSON.stringify({ preferenze: editPrefs }),
-        }),
-      ]);
+      const ruoloRes = await fetch(`/flask-api/api/dipendenti/${editDip.id}`, {
+        method: "PUT", headers: { "Content-Type": "application/json" }, credentials: "include",
+        body: JSON.stringify({ ruolo: editRuolo }),
+      });
+      const prefRes = ruoloRes.ok
+        ? await fetch(`/flask-api/api/dipendenti/${editDip.id}/preferenze`, {
+            method: "PUT", headers: { "Content-Type": "application/json" }, credentials: "include",
+            body: JSON.stringify({ preferenze: editPrefs }),
+          })
+        : ruoloRes;
       if (ruoloRes.ok && prefRes.ok) {
         const prefData = await prefRes.json();
         const riadattati: number = prefData.riadattati ?? 0;
@@ -553,7 +553,7 @@ export default function Caposala() {
                   <p className="font-bold text-foreground text-lg leading-tight">
                     {genLoading === "mese" ? "Generazione..." : "Genera Mese"}
                   </p>
-                  <p className="text-sm text-muted-foreground mt-1">Pianifica i prossimi 30 giorni</p>
+                  <p className="text-sm text-muted-foreground mt-1">Pianifica il mese corrente con giorni reali</p>
                 </div>
               </div>
             </button>

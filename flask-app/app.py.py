@@ -107,17 +107,19 @@ class Turno(db.Model):
 SOLO_MATTINO_NOMI = {'Anna', 'Orlando', 'Fabiana', 'Angela', 'Marina'}
 
 def preferenze_obbligatorie(dip):
-    if dip and dip.nome in SOLO_MATTINO_NOMI:
+    if dip and (dip.nome in SOLO_MATTINO_NOMI or dip.ruolo in ('AUSILIARIO', 'INFERMIERA')):
         return {'MATTINO'}
-    if dip and dip.ruolo in ('AUSILIARIO', 'INFERMIERA'):
-        return {'MATTINO'}
-    prefs = (dip.preferenze_turno or 'MATTINO,POMERIGGIO,NOTTE').split(',') if dip else []
+    prefs = (dip.preferenze_turno or '').split(',') if dip else []
     valide = {p for p in prefs if p in ('MATTINO', 'POMERIGGIO', 'NOTTE')}
     return valide or {'MATTINO', 'POMERIGGIO', 'NOTTE'}
 
 def applica_preferenze_obbligatorie(dip):
+    if dip and (dip.nome in SOLO_MATTINO_NOMI or dip.ruolo in ('AUSILIARIO', 'INFERMIERA')):
+        dip.preferenze_turno = 'MATTINO'
+        return {'MATTINO'}
     prefs = preferenze_obbligatorie(dip)
-    dip.preferenze_turno = ','.join(sorted(prefs))
+    if dip and not dip.preferenze_turno:
+        dip.preferenze_turno = ','.join(sorted(prefs))
     return prefs
 
 def smonto_ha_notte_precedente(dip_id, data_str):
@@ -278,9 +280,15 @@ def aggiorna_dipendente(id):
     if not me.is_admin and d.is_admin:
         return jsonify({'errore': 'Non autorizzato'}), 403
     data = request.json
-    for field in ['ruolo', 'ferie', 'malattia', 'preferenze_turno']:
+    for field in ['ruolo', 'ferie', 'malattia']:
         if field in data:
             setattr(d, field, data[field])
+    if 'preferenze_turno' in data:
+        prefs_raw = data.get('preferenze_turno') or []
+        if isinstance(prefs_raw, str):
+            prefs_raw = prefs_raw.split(',')
+        prefs_ok = [p for p in prefs_raw if p in ('MATTINO', 'POMERIGGIO', 'NOTTE')]
+        d.preferenze_turno = ','.join(sorted(set(prefs_ok))) if prefs_ok else 'MATTINO,POMERIGGIO,NOTTE'
     applica_preferenze_obbligatorie(d)
     db.session.commit()
     return jsonify(d.to_dict())
@@ -805,8 +813,19 @@ def genera_turni():
         return jsonify({'errore': 'Non autorizzato'}), 403
     data = request.json or {}
     modalita = data.get('modalita', 'settimana')
-    giorni = 1 if modalita == 'giorno' else (30 if modalita == 'mese' else 7)
-    result, err = _genera_interno(data.get('data_inizio', date.today().strftime('%Y-%m-%d')), giorni)
+    data_inizio = data.get('data_inizio', date.today().strftime('%Y-%m-%d'))
+    if modalita == 'mese':
+        try:
+            start = datetime.strptime(data_inizio, '%Y-%m-%d').date()
+        except Exception:
+            start = date.today()
+            data_inizio = start.strftime('%Y-%m-%d')
+        import calendar as _cal
+        giorni = _cal.monthrange(start.year, start.month)[1]
+        data_inizio = date(start.year, start.month, 1).strftime('%Y-%m-%d')
+    else:
+        giorni = 1 if modalita == 'giorno' else 7
+    result, err = _genera_interno(data_inizio, giorni)
     if err: return jsonify({'errore': err}), 400
     result['modalita'] = modalita
     return jsonify(result)
