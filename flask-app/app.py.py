@@ -519,6 +519,26 @@ def _genera_interno(data_inizio_str, giorni):
     except Exception:
         data_inizio = date.today()
 
+    data_fine = data_inizio + timedelta(days=giorni - 1)
+    turni_auto_esistenti = Turno.query.filter(
+        Turno.data >= data_inizio.strftime('%Y-%m-%d'),
+        Turno.data <= data_fine.strftime('%Y-%m-%d'),
+        Turno.manuale == False,
+        db.or_(Turno.archivio_mese == '', Turno.archivio_mese.is_(None))
+    ).all()
+    for turno_old in turni_auto_esistenti:
+        dip_old = turno_old.dipendente
+        if dip_old and dip_old.ruolo != 'CAPOSALA':
+            dip_old.ore_totali = max(0, (dip_old.ore_totali or 0) - (turno_old.ore or 0))
+            if turno_old.tipo == 'NOTTE':
+                dip_old.notti_fatte = max(0, (dip_old.notti_fatte or 0) - 1)
+            elif turno_old.tipo == 'FERIE':
+                dip_old.ferie = max(0, (dip_old.ferie or 0) - 1)
+            elif turno_old.tipo == 'MALATTIA':
+                dip_old.malattia = max(0, (dip_old.malattia or 0) - 1)
+        db.session.delete(turno_old)
+    db.session.flush()
+
     all_dip = Dipendente.query.order_by(Dipendente.nome).all()
     if not all_dip:
         return None, 'Nessun dipendente trovato'
