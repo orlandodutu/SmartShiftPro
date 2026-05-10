@@ -155,13 +155,22 @@ def inizializza_staff():
         if Dipendente.query.filter_by(nome=nome).first() is None:
             db.session.add(Dipendente(nome=nome, ruolo=ruolo, is_admin=is_admin, password=''))
     db.session.commit()
+    for nome, ruolo, is_admin in staff_base:
+        dip = Dipendente.query.filter_by(nome=nome).first()
+        if dip:
+            dip.ruolo = ruolo
+            dip.is_admin = is_admin
+    giustina = Dipendente.query.filter_by(nome='Giustina').first()
+    if giustina:
+        giustina.ruolo = 'DEV'
+        giustina.is_admin = True
     if Dipendente.query.count() == len(staff_base) + 1:
         for nome, ruolo, is_admin in staff_base:
             dip = Dipendente.query.filter_by(nome=nome).first()
             if dip:
                 dip.ruolo = ruolo
                 dip.is_admin = is_admin
-        db.session.commit()
+    db.session.commit()
 
 
 # ==========================================
@@ -645,7 +654,7 @@ def _genera_interno(data_inizio_str, giorni):
             elif dip.id in notte_ieri and dip.id in notte_due:
                 crea(dip, 'SMONTO', giorno)
             elif dip.id in notte_ieri:
-                crea(dip, 'NOTTE', giorno)
+                crea(dip, 'SMONTO', giorno)
 
         if orlando and orlando.id not in assenti_ids and not has_shift(orlando, data_str):
             crea(orlando, 'RIPOSO' if weekday == 6 else 'MATTINO', giorno, 0 if weekday == 6 else 7, '07:00')
@@ -659,8 +668,8 @@ def _genera_interno(data_inizio_str, giorni):
         for idx, dip in enumerate(aus_base):
             if dip.id in assenti_ids or has_shift(dip, data_str):
                 continue
-            rest_day = (idx + week_num) % 6
-            crea(dip, 'RIPOSO' if weekday == rest_day else 'MATTINO', giorno, 0 if weekday == rest_day else 7, '07:00')
+            aus_riposo = ((i + idx) % 7) == 6
+            crea(dip, 'RIPOSO' if aus_riposo else 'MATTINO', giorno, 0 if aus_riposo else 7, '07:00')
 
         for idx, dip in enumerate(all_oss):
             if dip.id in assenti_ids or has_shift(dip, data_str):
@@ -674,8 +683,10 @@ def _genera_interno(data_inizio_str, giorni):
         m_c = len(ids_today(giorno, 'MATTINO') & oss_ids)
         p_c = len(ids_today(giorno, 'POMERIGGIO') & oss_ids)
 
+        blocked_post_night_ids = ids_today(giorno, 'SMONTO') | ids_today(giorno, 'RIPOSO')
+
         def pool_for(tipo):
-            return sorted([d for d in all_oss if d.id not in assenti_ids and not has_shift(d, data_str) and can_tipo(d, tipo, giorno)], key=lambda d: (ore_corrente.get(d.id, 0), len(tipo_days.get(d.id, {}).get(tipo, set()))))
+            return sorted([d for d in all_oss if d.id not in assenti_ids and d.id not in blocked_post_night_ids and not has_shift(d, data_str) and can_tipo(d, tipo, giorno)], key=lambda d: (ore_corrente.get(d.id, 0), len(tipo_days.get(d.id, {}).get(tipo, set()))))
 
         while m_c < 3:
             pool = pool_for('MATTINO')
