@@ -513,726 +513,229 @@ def statistiche():
 
 
 def _genera_interno(data_inizio_str, giorni):
-    """Core shift generation logic. Called by both genera_turni and genera_giorno."""
     ORE_MAP = {'MATTINO': 7, 'POMERIGGIO': 7, 'NOTTE': 10, 'SMONTO': 0, 'RIPOSO': 0, 'FERIE': 0, 'MALATTIA': 0}
-    AUSILIARIO_ORE = 7
-    AUSILIARIO_ORARI = {'Marina': '07:00', 'Fabiana': '07:00', 'Angela': '07:00'}
-
     try:
         data_inizio = datetime.strptime(data_inizio_str, '%Y-%m-%d').date()
     except Exception:
         data_inizio = date.today()
 
     all_dip = Dipendente.query.order_by(Dipendente.nome).all()
-
-    # Night-eligible = 'NOTTE' in their preferenze_turno field
-    def is_notte_eligible(d):
-        return 'NOTTE' in (d.preferenze_turno or 'MATTINO,POMERIGGIO').split(',')
-
-    # Separate groups (admin excluded from role-based groups; CAPOSALA excluded entirely)
-    admin_staff = [d for d in all_dip if d.is_admin and d.ruolo != 'CAPOSALA']
-    infermieri  = [d for d in all_dip if d.ruolo == 'INFERMIERA' and not d.is_admin]
-    all_oss     = [d for d in all_dip if d.ruolo == 'OSS'        and not d.is_admin]
-    oss_notturni = [d for d in all_oss if is_notte_eligible(d)]
-    ausiliari   = [d for d in all_dip if d.ruolo == 'AUSILIARIO' and not d.is_admin]
-
     if not all_dip:
         return None, 'Nessun dipendente trovato'
 
+    def is_notte_eligible(d):
+        return 'NOTTE' in (d.preferenze_turno or 'MATTINO,POMERIGGIO').split(',')
+
+    infermieri = [d for d in all_dip if d.ruolo == 'INFERMIERA' and not d.is_admin]
+    all_oss = [d for d in all_dip if d.ruolo == 'OSS' and not d.is_admin]
+    oss_notturni = [d for d in all_oss if is_notte_eligible(d)]
+    ausiliari = [d for d in all_dip if d.ruolo == 'AUSILIARIO' and not d.is_admin]
+    orlando = next((d for d in ausiliari if d.nome == 'Orlando'), None)
+    aus_base = [d for d in ausiliari if d.nome != 'Orlando']
+
     generati = 0
-    saltati  = 0
+    saltati = 0
+    ore_corrente = {d.id: (d.ore_totali or 0) for d in all_dip}
+    tipo_days = {}
+    consec_work = {d.id: 0 for d in all_dip}
+    doppi_count = {d.id: 0 for d in all_dip}
 
-    # Hour equalization: track running cumulative hours per employee for this generation
-    ore_corrente: dict = {d.id: (d.ore_totali or 0) for d in all_dip}
+    def has_shift(dip, data_str, tipo=None):
+        q = Turno.query.filter_by(dipendente_id=dip.id, data=data_str)
+        if tipo:
+            q = q.filter_by(tipo=tipo)
+        return q.first() is not None
 
-    # ── Weekly trackers (per calendar week, keyed by Monday date string) ──
-    oss_riposi_week: dict = {}
-    oss_notti_week:  dict = {}
-    last_cal_week:   str  = ''
-    # OSS pulled from must_rest this week: they MUST rest on the next available day
-    oss_rest_debt:   set  = set()
-    # MAT/POM balance tracker per OSS: per una migliore alternanza mattino/pomeriggio
-    # {dip_id: {'MATTINO': n, 'POMERIGGIO': n}}  aggiornato da crea()
-    tipo_count: dict = {}
-    # Consecutive work & last-type trackers per OSS
-    consec_work_days: dict = {}   # giorni lavorativi consecutivi per OSS
-    last_two_tipos:   dict = {}   # ultimi 2 tipi MAT/POM assegnati per OSS
-    current_day = None
-    tipo_days: dict = {}
-    # Catena doppia notte: OSS che hanno fatto 2 notti consecutive e devono RIPOSO dopo SMONTO
-    doppia_notte_chain: set = set()
+    def can_tipo(dip, tipo, giorno):
+        count = 0
+        for back in range(1, 3):
+            ds = (giorno - timedelta(days=back)).strftime('%Y-%m-%d')
+            if ds in tipo_days.get(dip.id, {}).get(tipo, set()):
+                count += 1
+            else:
+                break
+        return count < 2
 
-    # ── MEMORIA PREGRESSA: pre-carica turni degli ultimi 30 gg prima di data_inizio ──
-    _seed_start = (data_inizio - timedelta(days=30)).strftime('%Y-%m-%d')
-    _seed_end   = (data_inizio - timedelta(days=1)).strftime('%Y-%m-%d')
-    for _t in Turno.query.filter(
-        Turno.data >= _seed_start,
-        Turno.data <= _seed_end,
-        Turno.tipo.in_(['MATTINO', 'POMERIGGIO'])
-    ).all():
-        _tc = tipo_count.setdefault(_t.dipendente_id, {'MATTINO': 0, 'POMERIGGIO': 0})
-        _tc[_t.tipo] += 1
-        tipo_days.setdefault(_t.dipendente_id, {}).setdefault(_t.tipo, set()).add(_t.data)
+    def track(dip, tipo, giorno):
+        ds = giorno.strftime('%Y-%m-%d')
+        if tipo in ('MATTINO', 'POMERIGGIO'):
+            tipo_days.setdefault(dip.id, {}).setdefault(tipo, set()).add(ds)
+        if tipo in ('MATTINO', 'POMERIGGIO', 'NOTTE'):
+            consec_work[dip.id] = consec_work.get(dip.id, 0) + 1
+        elif tipo in ('RIPOSO', 'SMONTO', 'FERIE', 'MALATTIA'):
+            consec_work[dip.id] = 0
 
-    # ── PRE-SEED 7 gg: inizializza consecutivi e ultimi 2 tipi per OSS ──
-    _seed7_start  = (data_inizio - timedelta(days=7)).strftime('%Y-%m-%d')
-    _oss_ids_seed = [d.id for d in all_oss]
-    if _oss_ids_seed:
-        _rec7 = Turno.query.filter(
-            Turno.data >= _seed7_start,
-            Turno.data <= _seed_end,
-            Turno.dipendente_id.in_(_oss_ids_seed)
-        ).order_by(Turno.data.desc()).all()
-        _by_dip7: dict = {}
-        for _t7 in _rec7:
-            _by_dip7.setdefault(_t7.dipendente_id, []).append((_t7.data, _t7.tipo))
-        for _d7 in all_oss:
-            _shifts7 = _by_dip7.get(_d7.id, [])
-            _consec7 = 0
-            for _back in range(1, 8):
-                _day7 = (data_inizio - timedelta(days=_back)).strftime('%Y-%m-%d')
-                _day_t7 = [s for s in _shifts7 if s[0] == _day7]
-                if not _day_t7 or _day_t7[0][1] in ('RIPOSO', 'SMONTO', 'FERIE', 'MALATTIA'):
-                    break
-                _consec7 += 1
-            consec_work_days[_d7.id] = _consec7
-            _mp7 = sorted(
-                [s for s in _shifts7 if s[1] in ('MATTINO', 'POMERIGGIO')],
-                key=lambda x: x[0]
-            )
-            last_two_tipos[_d7.id] = [s[1] for s in _mp7[-2:]]
-
-    # ── PRE-SEED doppia_notte_chain: OSS con SMONTO ieri che viene da 2 notti consecutive ──
-    # Caso: ieri=SMONTO, altroieri=NOTTE, ieri-2=NOTTE → oggi deve ricevere RIPOSO
-    _notte_m2 = {t.dipendente_id for t in Turno.query.filter_by(
-        data=(data_inizio - timedelta(days=2)).strftime('%Y-%m-%d'), tipo='NOTTE').all()}
-    _notte_m3 = {t.dipendente_id for t in Turno.query.filter_by(
-        data=(data_inizio - timedelta(days=3)).strftime('%Y-%m-%d'), tipo='NOTTE').all()}
-    _smonto_m1 = {t.dipendente_id for t in Turno.query.filter_by(
-        data=_seed_end, tipo='SMONTO').all()}
-    for _d in all_oss:
-        if _d.id in _smonto_m1 and _d.id in _notte_m2 and _d.id in _notte_m3:
-            doppia_notte_chain.add(_d.id)
-
-    # ── Costanti copertura giornaliera OSS: minimo 3 MAT + 3 POM, massimo 4+4 ──
-    MIN_MAT, MIN_POM, MAX_MAT, MAX_POM = 3, 3, 4, 4
-
-    def _can_tipo(dip, tipo):
-        """Verifica che assegnare questo tipo non violi la regola dei 2 consecutivi dello stesso tipo."""
-        ltt = last_two_tipos.get(dip.id, [])
-        if len(ltt) >= 2 and ltt[-2] == tipo and ltt[-1] == tipo:
+    def crea(dip, tipo, giorno, ore_override=None, ora_inizio='', allow_double=False, note='Auto'):
+        nonlocal generati, saltati
+        data_str = giorno.strftime('%Y-%m-%d')
+        if has_shift(dip, data_str) and not allow_double:
+            saltati += 1
             return False
-        if current_day is not None:
-            for back in range(1, 4):
-                day = (current_day - timedelta(days=back)).strftime('%Y-%m-%d')
-                if day not in tipo_days.get(dip.id, {}).get(tipo, set()):
-                    return True
+        if has_shift(dip, data_str, tipo):
+            saltati += 1
             return False
+        ore = ore_override if ore_override is not None else ORE_MAP.get(tipo, 0)
+        if not ora_inizio:
+            ora_inizio = {'MATTINO': '07:00', 'POMERIGGIO': '14:00', 'NOTTE': '21:00'}.get(tipo, '')
+        if allow_double:
+            note = note if 'DOPPIO' in note else f'{note} (DOPPIO)'
+            doppi_count[dip.id] = doppi_count.get(dip.id, 0) + 1
+        db.session.add(Turno(dipendente_id=dip.id, data=data_str, tipo=tipo, ore=ore, note=note, manuale=False, ora_inizio=ora_inizio))
+        if dip.ruolo != 'CAPOSALA':
+            dip.ore_totali += ore
+            ore_corrente[dip.id] = ore_corrente.get(dip.id, 0) + ore
+        if tipo == 'NOTTE':
+            dip.notti_fatte += 1
+        track(dip, tipo, giorno)
+        generati += 1
         return True
 
-    def _scegli_tipo(dip, m, p, prefers_pom):
-        """Restituisce 'MATTINO', 'POMERIGGIO' o None rispettando consecutivi e cap 4+4."""
-        can_m = m < MAX_MAT and _can_tipo(dip, 'MATTINO')
-        can_p = p < MAX_POM and _can_tipo(dip, 'POMERIGGIO')
-        need_m, need_p = m < MIN_MAT, p < MIN_POM
-        if need_m and not need_p:
-            return 'MATTINO' if can_m else ('POMERIGGIO' if can_p else None)
-        if need_p and not need_m:
-            return 'POMERIGGIO' if can_p else ('MATTINO' if can_m else None)
-        if need_m and need_p:
-            if prefers_pom and can_p: return 'POMERIGGIO'
-            if can_m: return 'MATTINO'
-            return 'POMERIGGIO' if can_p else None
-        # Sopra il minimo: riempi fino al massimo in base alla preferenza
-        if prefers_pom and can_p: return 'POMERIGGIO'
-        if can_m: return 'MATTINO'
-        return 'POMERIGGIO' if can_p else None
-
-    def _track_mat_pom(dip, tipo):
-        if tipo in ('MATTINO', 'POMERIGGIO'):
-            tc = tipo_count.setdefault(dip.id, {'MATTINO': 0, 'POMERIGGIO': 0})
-            tc[tipo] += 1
-            _ltt = last_two_tipos.setdefault(dip.id, [])
-            _ltt.append(tipo)
-            last_two_tipos[dip.id] = _ltt[-2:]
-            if current_day is not None:
-                tipo_days.setdefault(dip.id, {}).setdefault(tipo, set()).add(current_day.strftime('%Y-%m-%d'))
-
-    # ── AUS 6-day block tracker (keyed by (dip_id, block6) where block6 = ordinal // 6) ──
-    aus_riposi_6d:  dict = {}
-    last_aus_block: int  = -1
+    def ids_today(giorno, tipo=None):
+        q = Turno.query.filter_by(data=giorno.strftime('%Y-%m-%d'))
+        if tipo:
+            q = q.filter_by(tipo=tipo)
+        return {t.dipendente_id for t in q.all()}
 
     for i in range(giorni):
-        giorno   = data_inizio + timedelta(days=i)
-        current_day = giorno
+        giorno = data_inizio + timedelta(days=i)
         data_str = giorno.strftime('%Y-%m-%d')
-        ieri_str = (giorno - timedelta(days=1)).strftime('%Y-%m-%d')
-        weekday  = giorno.weekday()  # 0=Mon…6=Sun
+        weekday = giorno.weekday()
+        week_num = i // 7
+        wk_start = giorno - timedelta(days=weekday)
+        wk_end = wk_start + timedelta(days=6)
 
-        # Calendar-week key: Monday of the current week
-        cal_monday = giorno - timedelta(days=weekday)
-        cal_week   = cal_monday.strftime('%Y-%m-%d')
-        cal_sunday = (cal_monday + timedelta(days=6)).strftime('%Y-%m-%d')
-
-        # On entering a new calendar week: load existing RIPOSO/NOTTE for OSS from DB.
-        if cal_week != last_cal_week:
-            last_cal_week = cal_week
-            oss_rest_debt.clear()   # reset makeup-rest debt at start of each new week
-            for r in Turno.query.filter(
-                Turno.tipo == 'RIPOSO',
-                Turno.data >= cal_week,
-                Turno.data <= cal_sunday,
-            ).all():
-                oss_riposi_week[(r.dipendente_id, cal_week)] = True
-            for r in Turno.query.filter(
-                Turno.tipo == 'NOTTE',
-                Turno.data >= cal_week,
-                Turno.data <= cal_sunday,
-            ).all():
-                oss_notti_week[(r.dipendente_id, cal_week)] = True
-
-        # On entering a new 6-day block: load existing RIPOSO for AUS from DB.
-        aus_block = giorno.toordinal() // 6
-        if aus_block != last_aus_block:
-            last_aus_block = aus_block
-            blk_start = date.fromordinal(aus_block * 6).strftime('%Y-%m-%d')
-            blk_end   = date.fromordinal(aus_block * 6 + 5).strftime('%Y-%m-%d')
-            aus_ids   = [d.id for d in ausiliari]
-            if aus_ids:
-                for r in Turno.query.filter(
-                    Turno.tipo == 'RIPOSO',
-                    Turno.data >= blk_start,
-                    Turno.data <= blk_end,
-                    Turno.dipendente_id.in_(aus_ids)
-                ).all():
-                    b = date.fromisoformat(r.data).toordinal() // 6
-                    aus_riposi_6d[(r.dipendente_id, b)] = True
-
-        # IDs with any existing shift today
-        gia = {t.dipendente_id for t in Turno.query.filter_by(data=data_str).all()}
-
-        # Active absences for this day
-        assenze_oggi = Assenza.query.filter(
-            Assenza.data_inizio <= data_str,
-            Assenza.data_fine   >= data_str
-        ).all()
+        assenze_oggi = Assenza.query.filter(Assenza.data_inizio <= data_str, Assenza.data_fine >= data_str).all()
         assenti_ids = {a.dipendente_id for a in assenze_oggi}
+        for ass in assenze_oggi:
+            dip_a = db.session.get(Dipendente, ass.dipendente_id)
+            if dip_a and not has_shift(dip_a, data_str):
+                crea(dip_a, ass.tipo, giorno)
 
-        # Night-chain tracking from yesterday and the day before
-        avantieri_str  = (giorno - timedelta(days=2)).strftime('%Y-%m-%d')
-        notte_ieri     = {t.dipendente_id for t in Turno.query.filter_by(data=ieri_str,     tipo='NOTTE').all()}
-        notte_due_ieri = {t.dipendente_id for t in Turno.query.filter_by(data=avantieri_str, tipo='NOTTE').all()}
-        smonto_ieri    = {t.dipendente_id for t in Turno.query.filter_by(data=ieri_str,     tipo='SMONTO').all()}
-        riposo_ieri    = {t.dipendente_id for t in Turno.query.filter_by(data=ieri_str,     tipo='RIPOSO').all()}
+        ieri = (giorno - timedelta(days=1)).strftime('%Y-%m-%d')
+        avantieri = (giorno - timedelta(days=2)).strftime('%Y-%m-%d')
+        notte_ieri = {t.dipendente_id for t in Turno.query.filter_by(data=ieri, tipo='NOTTE').all()}
+        notte_due = {t.dipendente_id for t in Turno.query.filter_by(data=avantieri, tipo='NOTTE').all()}
+        smonto_ieri = {t.dipendente_id for t in Turno.query.filter_by(data=ieri, tipo='SMONTO').all()}
 
-        def crea(dip, tipo, ore_override=None, ora_inizio=''):
-            nonlocal generati, saltati
-            if dip.id in gia:
-                saltati += 1
-                return False
-            ore = ore_override if ore_override is not None else ORE_MAP.get(tipo, 0)
-            if not ora_inizio:
-                ora_inizio = {'MATTINO': '07:00', 'POMERIGGIO': '14:00', 'NOTTE': '21:00'}.get(tipo, '')
-            t = Turno(dipendente_id=dip.id, data=data_str, tipo=tipo, ore=ore, note='Auto', manuale=False, ora_inizio=ora_inizio)
-            db.session.add(t)
-            gia.add(dip.id)
-            if dip.ruolo != 'CAPOSALA':
-                dip.ore_totali += ore
-                ore_corrente[dip.id] = ore_corrente.get(dip.id, 0) + ore
-            if tipo == 'NOTTE':    dip.notti_fatte += 1
-            elif tipo == 'FERIE':  dip.ferie       += 1
-            elif tipo == 'MALATTIA': dip.malattia  += 1
-            _track_mat_pom(dip, tipo)
-            # Aggiorna tracker giorni consecutivi
-            if tipo in ('MATTINO', 'POMERIGGIO', 'NOTTE'):
-                consec_work_days[dip.id] = consec_work_days.get(dip.id, 0) + 1
-            else:
-                consec_work_days[dip.id] = 0
-            generati += 1
-            return True
-
-        # ── 0. Pre-assign absence shifts (MALATTIA / FERIE) ──
-        for assenza in assenze_oggi:
-            dip_a = db.session.get(Dipendente, assenza.dipendente_id)
-            if dip_a and dip_a.id not in gia:
-                crea(dip_a, assenza.tipo)
-
-        # ── 1. Admin (Giustina): turni fissi non gestiti dal generatore automatico ──
-        # Giustina gestisce i propri turni separatamente; esclusa dalla griglia OSS.
-
-        # ── 2. Infermiera: MATTINO, rest Sun always, alt-Sat ──
-        # Guard: se ieri era già RIPOSO (es. sabato di riposo in settimana pari),
-        # la domenica lavora per evitare due riposi consecutivi.
-        for dip in infermieri:
-            if dip.id in gia: continue
-            if consec_work_days.get(dip.id, 0) >= 3:
-                crea(dip, 'RIPOSO')
-                continue
-            if weekday == 6:
-                if dip.id in riposo_ieri:
-                    crea(dip, 'MATTINO', 7)   # ieri già riposo → lavora domenica
-                else:
-                    crea(dip, 'RIPOSO')
-            elif weekday == 5 and (i // 7) % 2 == 0:
-                crea(dip, 'RIPOSO')
-            else:
-                crea(dip, 'MATTINO', 7)
-
-        # ── 3. OSS Night chain ──
-        # Catena 1 notte:  NOTTE → SMONTO (recupero, nessun RIPOSO forzato)
-        # Catena 2 notti:  NOTTE → NOTTE → SMONTO → RIPOSO (obbligatorio)
-        # Se ieri c'era NOTTE ma non altroieri → è la 1a notte: assegna 2a notte consecutiva.
-        # Se ieri c'era NOTTE E altroieri c'era NOTTE → 2 notti complete → SMONTO + marca RIPOSO.
         for dip in all_oss:
-            if dip.id in gia: continue
-            if dip.id in notte_ieri:
-                if dip.id in notte_due_ieri:
-                    # Ha già fatto 2 notti consecutive → SMONTO oggi, RIPOSO domani
-                    crea(dip, 'SMONTO')
-                    doppia_notte_chain.add(dip.id)
-                    # Fix A: SMONTO conta come riposo settimanale (evita un 2° riposo cercato dalla sezione 4)
-                    oss_riposi_week[(dip.id, cal_week)] = True
-                else:
-                    # È la 1a notte → assegna la 2a notte consecutiva
-                    crea(dip, 'NOTTE')
-                    oss_notti_week[(dip.id, cal_week)] = True
-
-        # ── 3b. Pre-reserve NOTTE candidate (exclude from regular shift pool) ──
-        # Selecting the NOTTE worker BEFORE section 4 guarantees coverage even on Sunday
-        # when all notte-eligible OSS would otherwise end up in must_rest and get RIPOSO.
-        notte_riserva_id = None
-        # Sort NOTTE candidates by hours descending: highest-hour person gets NOTTE first.
-        # NOTTE(10h)+SMONTO(0h)+RIPOSO(0h) = only 10h for 3 days → balances those with more hours.
-        notte_cands_sorted = sorted(
-            oss_notturni,
-            key=lambda d: ore_corrente.get(d.id, 0),
-            reverse=True
-        )
-        for cand in notte_cands_sorted:
-            if cand.id in gia or cand.id in assenti_ids:
+            if dip.id in assenti_ids or has_shift(dip, data_str):
                 continue
-            # Chi deve riposare dopo doppia catena NOTTE→NOTTE→SMONTO non può fare NOTTE
-            if cand.id in smonto_ieri and cand.id in doppia_notte_chain:
+            if dip.id in smonto_ieri and dip.id in notte_due:
+                crea(dip, 'RIPOSO', giorno)
+            elif dip.id in notte_ieri and dip.id in notte_due:
+                crea(dip, 'SMONTO', giorno)
+            elif dip.id in notte_ieri:
+                crea(dip, 'NOTTE', giorno)
+
+        if orlando and orlando.id not in assenti_ids and not has_shift(orlando, data_str):
+            crea(orlando, 'RIPOSO' if weekday == 6 else 'MATTINO', giorno, 0 if weekday == 6 else 7, '07:00')
+
+        for dip in infermieri:
+            if dip.id in assenti_ids or has_shift(dip, data_str):
                 continue
-            if oss_notti_week.get((cand.id, cal_week), False):
-                continue  # Prefer fresh (no NOTTE yet this week)
-            notte_riserva_id = cand.id
-            break
-        if notte_riserva_id is None:
-            for cand in notte_cands_sorted:
-                if cand.id not in gia and cand.id not in assenti_ids:
-                    # Non può fare NOTTE chi deve riposare dopo doppia catena
-                    if cand.id in smonto_ieri and cand.id in doppia_notte_chain:
-                        continue
-                    notte_riserva_id = cand.id
-                    break
-        # (If notte_riserva_id is still None, we'll fall back to double shifts in 4b)
+            rest_day = 5 if week_num % 2 == 0 else 6
+            crea(dip, 'RIPOSO' if weekday == rest_day else 'MATTINO', giorno, 0 if weekday == rest_day else 7, '07:00')
 
-        # ── 4. Remaining OSS: urgency-based exactly 1 RIPOSO per calendar week ──
-        # Strategy: each OSS has a designated rest weekday = (rank + week_num_local) % 7.
-        # Additionally, on the last day of the week (Sunday / last generation day),
-        # anyone who still hasn't rested is forced to rest (urgency = 1).
-        # Post-SMONTO rest: OSS who had SMONTO yesterday need today as their RIPOSO.
-        week_num_local = i // 7
-        is_last_day_of_week = (weekday == 6) or (i == giorni - 1)
-        # is_true_sunday: usato per Fix C (niente pull da must_rest) e estensione domenicale.
-        # È DISTINTO da is_last_day_of_week (che include l'ultimo giorno di generazione):
-        # non vogliamo bloccare la copertura quando il mese finisce a metà settimana.
-        is_true_sunday = (weekday == 6)
-        n = len(all_oss)
-        # Exclude the pre-reserved NOTTE candidate from regular assignment
-        oss_liberi = [d for d in all_oss
-                      if d.id not in gia and d.id not in assenti_ids
-                      and d.id != notte_riserva_id]
-
-        oss_must_rest  = []  # must rest today (designated day, post-SMONTO, or last day)
-        oss_may_rest   = []  # haven't rested yet but can wait
-        oss_rested     = []  # already have their RIPOSO this week
-
-        for dip in oss_liberi:
-            # Fix B: RIPOSO obbligatorio SOLO dopo catena doppia NOTTE → SMONTO
-            if dip.id in smonto_ieri:
-                if dip.id in doppia_notte_chain:
-                    # 2 notti consecutive → RIPOSO obbligatorio
-                    doppia_notte_chain.discard(dip.id)
-                    oss_must_rest.append(dip)
-                    continue
-                # 1 sola notte → solo SMONTO (recupero), torna nel pool regolare
-            # Regola 6 giorni: dopo 6 giorni lavorativi consecutivi riposo obbligatorio
-            if consec_work_days.get(dip.id, 0) >= 6:
-                oss_must_rest.append(dip)
+        for idx, dip in enumerate(aus_base):
+            if dip.id in assenti_ids or has_shift(dip, data_str):
                 continue
-            ha_riposato  = oss_riposi_week.get((dip.id, cal_week), False)
-            if ha_riposato:
-                oss_rested.append(dip)
+            rest_day = (idx + week_num) % 6
+            crea(dip, 'RIPOSO' if weekday == rest_day else 'MATTINO', giorno, 0 if weekday == rest_day else 7, '07:00')
+
+        for idx, dip in enumerate(all_oss):
+            if dip.id in assenti_ids or has_shift(dip, data_str):
                 continue
-            p_rank        = all_oss.index(dip)
-            rest_weekday  = (p_rank + week_num_local) % 7
-            # Fix D: OSS con debito riposo (strappati questa settimana) → must_rest ogni giorno
-            has_rest_debt = dip.id in oss_rest_debt
-            if has_rest_debt or weekday == rest_weekday or is_last_day_of_week:
-                oss_must_rest.append(dip)
-            else:
-                oss_may_rest.append(dip)
+            rested_week = Turno.query.filter(Turno.dipendente_id == dip.id, Turno.data >= wk_start.strftime('%Y-%m-%d'), Turno.data <= wk_end.strftime('%Y-%m-%d'), Turno.tipo == 'RIPOSO').first() is not None
+            rest_day = (idx + week_num) % 7
+            if consec_work.get(dip.id, 0) >= 6 or (not rested_week and weekday == rest_day):
+                crea(dip, 'RIPOSO', giorno)
 
-        # Fill coverage slots from rested + may_rest first (workers)
-        # Sort by: 1) fewest hours (equalization), 2) MAT excess (more MAT → gets POM next)
-        def _worker_sort_key(d):
-            tc = tipo_count.get(d.id, {'MATTINO': 0, 'POMERIGGIO': 0})
-            mat_excess = tc['MATTINO'] - tc['POMERIGGIO']  # positive → had more MAT → prefer POM
-            return (ore_corrente.get(d.id, 0), mat_excess)
+        oss_ids = {d.id for d in all_oss}
+        m_c = len(ids_today(giorno, 'MATTINO') & oss_ids)
+        p_c = len(ids_today(giorno, 'POMERIGGIO') & oss_ids)
 
-        workers = oss_rested + oss_may_rest
-        workers.sort(key=_worker_sort_key)
+        def pool_for(tipo):
+            return sorted([d for d in all_oss if d.id not in assenti_ids and not has_shift(d, data_str) and can_tipo(d, tipo, giorno)], key=lambda d: (ore_corrente.get(d.id, 0), len(tipo_days.get(d.id, {}).get(tipo, set()))))
 
-        m_c = p_c = 0
-        for dip in workers:
-            if m_c >= MAX_MAT and p_c >= MAX_POM:
-                break  # copertura massima raggiunta (4+4)
-            tc = tipo_count.get(dip.id, {'MATTINO': 0, 'POMERIGGIO': 0})
-            prefers_pom = tc['MATTINO'] > tc['POMERIGGIO']
-            tipo = _scegli_tipo(dip, m_c, p_c, prefers_pom)
-            if tipo:
-                crea(dip, tipo)
-                if tipo == 'MATTINO':      m_c += 1
-                elif tipo == 'POMERIGGIO': p_c += 1
-
-        # Pull from must_rest SOLO se la copertura è sotto il minimo critico
-        # Fix C: MAI strappare il riposo l'ultimo giorno della settimana (domenica).
-        # La domenica garantisce il riposo a chiunque non l'abbia ancora avuto;
-        # la copertura viene assicurata dai doppi turni dei già-riposati.
-        oss_must_rest.sort(key=lambda d: ore_corrente.get(d.id, 0), reverse=True)
-        if not is_true_sunday:
-            for dip in list(oss_must_rest):
-                if dip.id in smonto_ieri:
-                    continue
-                if i == giorni - 1 and dip.id in oss_rest_debt:
-                    continue
-                if m_c < MIN_MAT:
-                    if not _can_tipo(dip, 'MATTINO'):
-                        continue
-                    oss_must_rest.remove(dip)
-                    crea(dip, 'MATTINO');    m_c += 1
-                    oss_rest_debt.add(dip.id)
-                elif m_c >= MIN_MAT and p_c < MIN_POM:
-                    if not _can_tipo(dip, 'POMERIGGIO'):
-                        continue
-                    oss_must_rest.remove(dip)
-                    crea(dip, 'POMERIGGIO'); p_c += 1
-                    oss_rest_debt.add(dip.id)
-                else:
-                    break
-        # Se domenica (o ultimo giorno del periodo), estendi la copertura dai notturni riposati
-        if is_true_sunday or i == giorni - 1:
-            extras = sorted(
-                [d for d in oss_rested
-                 if d.id not in gia and is_notte_eligible(d)],
-                key=lambda d: ore_corrente.get(d.id, 0)
-            )
-            for dip in extras:
-                if m_c >= MIN_MAT and p_c >= MIN_POM:
-                    break
-                tc = tipo_count.get(dip.id, {'MATTINO': 0, 'POMERIGGIO': 0})
-                prefers_pom = tc['MATTINO'] > tc['POMERIGGIO']
-                tipo = _scegli_tipo(dip, m_c, p_c, prefers_pom)
-                if tipo:
-                    crea(dip, tipo)
-                    if tipo == 'MATTINO':      m_c += 1
-                    elif tipo == 'POMERIGGIO': p_c += 1
-
-        # Assign RIPOSO — nessun limite giornaliero: garantisce 1 riposo/settimana a rotazione
-        oss_must_rest_smonto = [d for d in oss_must_rest if d.id in smonto_ieri]
-        oss_must_rest_normali = [d for d in oss_must_rest if d.id not in smonto_ieri]
-
-        for dip in oss_must_rest_smonto:
-            # RIPOSO obbligatorio dopo catena NOTTE→NOTTE→SMONTO (2 notti consecutive).
-            # Il giorno prima era SMONTO, quindi non ci può essere un doppio riposo.
-            crea(dip, 'RIPOSO')
-            oss_riposi_week[(dip.id, cal_week)] = True
-            oss_rest_debt.discard(dip.id)
-
-        for dip in oss_must_rest_normali:
-            if dip.id in riposo_ieri:
-                # Ieri era già RIPOSO: evita due riposi consecutivi → lavora oggi.
-                tc = tipo_count.get(dip.id, {'MATTINO': 0, 'POMERIGGIO': 0})
-                prefers_pom = tc['MATTINO'] > tc['POMERIGGIO']
-                tipo = _scegli_tipo(dip, m_c, p_c, prefers_pom)
-                if tipo is None:
-                    continue
-                crea(dip, tipo)
-                if tipo == 'MATTINO':      m_c += 1
-                elif tipo == 'POMERIGGIO': p_c += 1
-            else:
-                crea(dip, 'RIPOSO')
-                oss_riposi_week[(dip.id, cal_week)] = True
-                oss_rest_debt.discard(dip.id)
-
-        # ── 4b. NOTTE assignment — after regular OSS shifts to allow double shifts ──
-        #
-        # Priority order:
-        #   P1: pre-reserved pure NOTTE candidate (selected in section 3b)
-        #   P2: POMERIGGIO-NOTTE double (notte-eligible OSS already on POMERIGGIO today)
-        #   P3: MATTINO-NOTTE double  (notte-eligible OSS already on MATTINO today)
-        #
-        def _add_notte_direct(candidate, primo_turno=''):
-            """Create NOTTE turno directly, bypassing gia check (for pre-reserved / doubles)."""
-            nonlocal generati
-            ore_n = ORE_MAP['NOTTE']
-            nota  = f'Auto ({primo_turno}+NOTTE)' if primo_turno else 'Auto'
-            t = Turno(
-                dipendente_id=candidate.id, data=data_str, tipo='NOTTE',
-                ore=ore_n, note=nota, manuale=False, ora_inizio=''
-            )
-            db.session.add(t)
-            gia.add(candidate.id)
-            candidate.ore_totali += ore_n
-            ore_corrente[candidate.id] = ore_corrente.get(candidate.id, 0) + ore_n
-            candidate.notti_fatte += 1
-            oss_notti_week[(candidate.id, cal_week)] = True
-            generati += 1
-
-        assigned_notte = False
-
-        # P1: pure NOTTE — assign to pre-reserved candidate
-        if notte_riserva_id is not None:
-            for d in oss_notturni:
-                if d.id == notte_riserva_id:
-                    _add_notte_direct(d)
-                    assigned_notte = True
-                    break
-
-        # P2: POMERIGGIO-NOTTE double shift fallback
-        if not assigned_notte:
-            pom_oggi = {
-                t.dipendente_id
-                for t in Turno.query.filter_by(data=data_str, tipo='POMERIGGIO').all()
-            }
-            for offset in range(len(oss_notturni)):
-                candidate = oss_notturni[(i + offset) % len(oss_notturni)]
-                if candidate.id in assenti_ids:
-                    continue
-                if (candidate.id in pom_oggi
-                        and not oss_notti_week.get((candidate.id, cal_week), False)):
-                    _add_notte_direct(candidate, 'POMERIGGIO')
-                    assigned_notte = True
-                    break
-
-        # P3: MATTINO-NOTTE double shift (last resort)
-        if not assigned_notte:
-            mat_oggi = {
-                t.dipendente_id
-                for t in Turno.query.filter_by(data=data_str, tipo='MATTINO').all()
-            }
-            for offset in range(len(oss_notturni)):
-                candidate = oss_notturni[(i + offset) % len(oss_notturni)]
-                if candidate.id in assenti_ids:
-                    continue
-                if (candidate.id in mat_oggi
-                        and not oss_notti_week.get((candidate.id, cal_week), False)):
-                    _add_notte_direct(candidate, 'MATTINO')
-                    break
-
-        # ── 4c. MATTINO+POMERIGGIO doubles ──
-        # Non-night OSS regularly cover MAT+POM.
-        # Night-eligible OSS (Carmen, Barbara, Elena) accumulate far fewer hours per
-        # NOTTE cycle (10h for 3 days vs 21h for 3 regular shifts). To equalize monthly
-        # totals we also allow them to take MAT+POM doubles on days they are NOT already
-        # assigned a NOTTE. The lowest-hours worker gets the double first.
-        notte_oggi_ids = {
-            t.dipendente_id
-            for t in Turno.query.filter_by(data=data_str, tipo='NOTTE').all()
-        }
-
-        # 4c: aggiunge POM in doppio (MAT+POM) se copertura POM è sotto il minimo (3)
-        if p_c < MIN_POM:
-            mat_ids_oggi = {
-                t.dipendente_id
-                for t in Turno.query.filter_by(data=data_str, tipo='MATTINO').all()
-            }
-            candidati_dop = sorted(
-                [d for d in all_oss
-                 if d.id in mat_ids_oggi
-                 and d.id not in assenti_ids
-                 and d.id not in notte_oggi_ids],
-                key=lambda d: ore_corrente.get(d.id, 0)
-            )
-            for dip in candidati_dop:
-                if p_c >= MIN_POM:
-                    break
-                if not _can_tipo(dip, 'POMERIGGIO'):
-                    continue
-                ore_p = ORE_MAP['POMERIGGIO']
-                db.session.add(Turno(
-                    dipendente_id=dip.id, data=data_str, tipo='POMERIGGIO',
-                    ore=ore_p, note='Auto (MAT+POM)', manuale=False, ora_inizio='14:00'
-                ))
-                dip.ore_totali += ore_p
-                ore_corrente[dip.id] = ore_corrente.get(dip.id, 0) + ore_p
-                _track_mat_pom(dip, 'POMERIGGIO')
-                generati += 1
+        while m_c < 3:
+            pool = pool_for('MATTINO')
+            if not pool:
+                break
+            if crea(pool[0], 'MATTINO', giorno):
+                m_c += 1
+        while p_c < 3:
+            pool = pool_for('POMERIGGIO')
+            if not pool:
+                break
+            if crea(pool[0], 'POMERIGGIO', giorno):
                 p_c += 1
 
-        # Symmetrical: aggiunge MAT in doppio (POM+MAT) se copertura MAT è sotto il minimo (3)
-        if m_c < MIN_MAT:
-            pom_ids_oggi = {
-                t.dipendente_id
-                for t in Turno.query.filter_by(data=data_str, tipo='POMERIGGIO').all()
-            }
-            candidati_mat = sorted(
-                [d for d in all_oss
-                 if d.id in pom_ids_oggi
-                 and d.id not in assenti_ids
-                 and d.id not in notte_oggi_ids],
-                key=lambda d: ore_corrente.get(d.id, 0)
-            )
-            for dip in candidati_mat:
-                if m_c >= MIN_MAT:
-                    break
-                if not _can_tipo(dip, 'MATTINO'):
-                    continue
-                ore_m = ORE_MAP['MATTINO']
-                db.session.add(Turno(
-                    dipendente_id=dip.id, data=data_str, tipo='MATTINO',
-                    ore=ore_m, note='Auto (POM+MAT)', manuale=False, ora_inizio='07:00'
-                ))
-                dip.ore_totali += ore_m
-                ore_corrente[dip.id] = ore_corrente.get(dip.id, 0) + ore_m
-                _track_mat_pom(dip, 'MATTINO')
-                generati += 1
-                m_c += 1
-
-        # ── 4c-fallback. Emergency coverage: usa oss_rested se la copertura minima (3+3) non è raggiunta ──
-        if m_c < MIN_MAT or p_c < MIN_POM:
-            emergency_pool = sorted(
-                [d for d in oss_rested if d.id not in gia],
-                key=lambda d: ore_corrente.get(d.id, 0)
-            )
-            for dip in emergency_pool:
-                if m_c >= MIN_MAT and p_c >= MIN_POM:
-                    break
-                tc = tipo_count.get(dip.id, {'MATTINO': 0, 'POMERIGGIO': 0})
-                prefers_pom = tc['MATTINO'] > tc['POMERIGGIO']
-                tipo = _scegli_tipo(dip, m_c, p_c, prefers_pom)
-                if tipo is None:
-                    continue
-                crea(dip, tipo)
-                if tipo == 'MATTINO':      m_c += 1
-                elif tipo == 'POMERIGGIO': p_c += 1
-
-        # ── 4d. Equalization doubles for night-eligible OSS ──
-        # Each NOTTE cycle (NOTTE 10h + SMONTO 0h + RIPOSO 0h) gives only 10h for
-        # 3 days while non-night workers accumulate ~21h in the same period.
-        # This dedicated pass fires ONLY on regular working days (when the worker
-        # already has MATTINO or POMERIGGIO) and adds the complementary shift whenever
-        # the worker's running total is more than 7h below the OSS group average.
-        # Threshold = 7h ≈ 1 regular shift: fires ~1 extra double per NOTTE cycle,
-        # bridging the gap to ~173 h/month without overshooting.
-        if all_oss:
-            avg_ore_4d = sum(ore_corrente.get(d.id, 0) for d in all_oss) / len(all_oss)
-            mat_ids_4d = {
-                t.dipendente_id
-                for t in Turno.query.filter_by(data=data_str, tipo='MATTINO').all()
-            }
-            pom_ids_4d = {
-                t.dipendente_id
-                for t in Turno.query.filter_by(data=data_str, tipo='POMERIGGIO').all()
-            }
-            for dip in sorted(
-                [d for d in all_oss
-                 if is_notte_eligible(d)
-                 and d.id not in assenti_ids
-                 and d.id not in notte_oggi_ids],
-                key=lambda d: ore_corrente.get(d.id, 0)
-            ):
-                gap = avg_ore_4d - ore_corrente.get(dip.id, 0)
-                if gap <= 3:
-                    continue
-                if dip.id in mat_ids_4d and dip.id not in pom_ids_4d:
-                    if not _can_tipo(dip, 'POMERIGGIO'):
-                        continue
-                    ore_p = ORE_MAP['POMERIGGIO']
-                    db.session.add(Turno(
-                        dipendente_id=dip.id, data=data_str, tipo='POMERIGGIO',
-                        ore=ore_p, note='Auto (EQ)', manuale=False, ora_inizio='14:00'
-                    ))
-                    dip.ore_totali += ore_p
-                    ore_corrente[dip.id] = ore_corrente.get(dip.id, 0) + ore_p
-                    _track_mat_pom(dip, 'POMERIGGIO')
-                    generati += 1
-                elif dip.id in pom_ids_4d and dip.id not in mat_ids_4d:
-                    if not _can_tipo(dip, 'MATTINO'):
-                        continue
-                    ore_m = ORE_MAP['MATTINO']
-                    db.session.add(Turno(
-                        dipendente_id=dip.id, data=data_str, tipo='MATTINO',
-                        ore=ore_m, note='Auto (EQ)', manuale=False, ora_inizio='07:00'
-                    ))
-                    dip.ore_totali += ore_m
-                    ore_corrente[dip.id] = ore_corrente.get(dip.id, 0) + ore_m
-                    _track_mat_pom(dip, 'MATTINO')
-                    generati += 1
-
-        # ── 5. Ausiliari: 07–15, exactly 1 RIPOSO every 6 days (block-based) ──
-        # aus_block computed above when loading DB records.
-        # Each AUS rests on the day within the 6-day block matching their rank-offset.
-        n_aus = len(ausiliari)
-        aus_libere = [d for d in ausiliari if d.id not in gia and d.id not in assenti_ids]
-
-        aus_must_rest = []
-        aus_workers   = []
-
-        day_in_block        = giorno.toordinal() % 6       # 0–5 position within current 6-day block
-        is_last_day_of_block = (day_in_block == 5) or (i == giorni - 1)
-
-        for dip in aus_libere:
-            ha_riposato = aus_riposi_6d.get((dip.id, aus_block), False)
-            if dip.nome == 'Orlando' and weekday == 6:
-                aus_must_rest.append(dip)
-                continue
-            if consec_work_days.get(dip.id, 0) >= 3:
-                aus_must_rest.append(dip)
-                continue
-            if ha_riposato:
-                aus_workers.append(dip)
-                continue
-            p_rank           = ausiliari.index(dip)
-            rest_day_in_block = (p_rank + aus_block) % 6
-            if day_in_block == rest_day_in_block or is_last_day_of_block:
-                aus_must_rest.append(dip)
+        if not ids_today(giorno, 'NOTTE') and oss_notturni:
+            night_pool = sorted([d for d in oss_notturni if d.id not in assenti_ids and not has_shift(d, data_str)], key=lambda d: (d.notti_fatte or 0, ore_corrente.get(d.id, 0)))
+            if night_pool:
+                crea(night_pool[0], 'NOTTE', giorno)
             else:
-                aus_workers.append(dip)
+                existing = sorted([d for d in oss_notturni if d.id not in assenti_ids and d.id not in ids_today(giorno, 'RIPOSO') and d.id not in ids_today(giorno, 'SMONTO')], key=lambda d: (doppi_count.get(d.id, 0), ore_corrente.get(d.id, 0)))
+                if existing:
+                    first_tipo = 'POMERIGGIO' if existing[0].id in ids_today(giorno, 'POMERIGGIO') else 'MATTINO'
+                    crea(existing[0], 'NOTTE', giorno, allow_double=True, note=f'Auto (DOPPIO {first_tipo}+NOTTE)')
 
-        # Ensure at least 1 ausiliario works each day
-        if not aus_workers and aus_must_rest:
-            fallback_aus = next(
-                (d for d in reversed(aus_must_rest) if not (d.nome == 'Orlando' and weekday == 6)),
-                None
-            )
-            if fallback_aus:
-                aus_must_rest.remove(fallback_aus)
-                aus_workers.append(fallback_aus)
+        m_c = len(ids_today(giorno, 'MATTINO') & oss_ids)
+        p_c = len(ids_today(giorno, 'POMERIGGIO') & oss_ids)
+        if p_c < 3:
+            for dip in sorted([d for d in all_oss if d.id in (ids_today(giorno, 'MATTINO') & oss_ids) and d.id not in ids_today(giorno, 'NOTTE')], key=lambda d: doppi_count.get(d.id, 0)):
+                if p_c >= 3:
+                    break
+                if can_tipo(dip, 'POMERIGGIO', giorno) and crea(dip, 'POMERIGGIO', giorno, allow_double=True, note='Auto (DOPPIO MAT+POM)'):
+                    p_c += 1
+            if p_c < 3:
+                for dip in sorted([d for d in all_oss if d.id in (ids_today(giorno, 'NOTTE') & oss_ids) and d.id not in ids_today(giorno, 'MATTINO')], key=lambda d: doppi_count.get(d.id, 0)):
+                    if p_c >= 3:
+                        break
+                    if can_tipo(dip, 'POMERIGGIO', giorno) and crea(dip, 'POMERIGGIO', giorno, allow_double=True, note='Auto (DOPPIO POM+NOTTE)'):
+                        p_c += 1
+            for dip in sorted([d for d in all_oss if d.id in (ids_today(giorno, 'MATTINO') & oss_ids) and d.id not in ids_today(giorno, 'NOTTE')], key=lambda d: doppi_count.get(d.id, 0)):
+                if p_c >= 3:
+                    break
+                if crea(dip, 'POMERIGGIO', giorno, allow_double=True, note='Auto (DOPPIO MAT+POM COPERTURA)'):
+                    p_c += 1
+        if m_c < 3:
+            for dip in sorted([d for d in all_oss if d.id in (ids_today(giorno, 'POMERIGGIO') & oss_ids) and d.id not in ids_today(giorno, 'NOTTE')], key=lambda d: doppi_count.get(d.id, 0)):
+                if m_c >= 3:
+                    break
+                if can_tipo(dip, 'MATTINO', giorno) and crea(dip, 'MATTINO', giorno, allow_double=True, note='Auto (DOPPIO MAT+POM)'):
+                    m_c += 1
+            if m_c < 3:
+                for dip in sorted([d for d in all_oss if d.id in (ids_today(giorno, 'NOTTE') & oss_ids) and d.id not in ids_today(giorno, 'POMERIGGIO')], key=lambda d: doppi_count.get(d.id, 0)):
+                    if m_c >= 3:
+                        break
+                    if can_tipo(dip, 'MATTINO', giorno) and crea(dip, 'MATTINO', giorno, allow_double=True, note='Auto (DOPPIO MAT+NOTTE)'):
+                        m_c += 1
+            for dip in sorted([d for d in all_oss if d.id in (ids_today(giorno, 'POMERIGGIO') & oss_ids) and d.id not in ids_today(giorno, 'NOTTE')], key=lambda d: doppi_count.get(d.id, 0)):
+                if m_c >= 3:
+                    break
+                if crea(dip, 'MATTINO', giorno, allow_double=True, note='Auto (DOPPIO MAT+POM COPERTURA)'):
+                    m_c += 1
 
-        for dip in aus_workers:
-            ora = AUSILIARIO_ORARI.get(dip.nome, '07:00')
-            crea(dip, 'MATTINO', AUSILIARIO_ORE, ora_inizio=ora)
-
-        for dip in aus_must_rest:
-            if dip.nome == 'Orlando' and weekday == 6:
-                crea(dip, 'RIPOSO')
-                aus_riposi_6d[(dip.id, aus_block)] = True
-                continue
-            if dip.id in riposo_ieri:
-                # Ieri era già RIPOSO: evita due riposi consecutivi → lavora oggi.
-                ora = AUSILIARIO_ORARI.get(dip.nome, '07:00')
-                crea(dip, 'MATTINO', AUSILIARIO_ORE, ora_inizio=ora)
-                # Non segniamo come riposata: riposerà nel prossimo blocco da 6 giorni.
-            else:
-                crea(dip, 'RIPOSO')
-                aus_riposi_6d[(dip.id, aus_block)] = True
+        m_c = len(ids_today(giorno, 'MATTINO') & oss_ids)
+        p_c = len(ids_today(giorno, 'POMERIGGIO') & oss_ids)
+        blocked_ids = ids_today(giorno, 'RIPOSO') | ids_today(giorno, 'SMONTO')
+        if m_c < 3:
+            for dip in sorted([d for d in all_oss if d.id not in assenti_ids and d.id not in blocked_ids and d.id not in ids_today(giorno, 'MATTINO')], key=lambda d: doppi_count.get(d.id, 0)):
+                if m_c >= 3:
+                    break
+                if crea(dip, 'MATTINO', giorno, allow_double=True, note='Auto (DOPPIO MAT COPERTURA)'):
+                    m_c += 1
+        if p_c < 3:
+            for dip in sorted([d for d in all_oss if d.id not in assenti_ids and d.id not in blocked_ids and d.id not in ids_today(giorno, 'POMERIGGIO')], key=lambda d: doppi_count.get(d.id, 0)):
+                if p_c >= 3:
+                    break
+                if crea(dip, 'POMERIGGIO', giorno, allow_double=True, note='Auto (DOPPIO POM COPERTURA)'):
+                    p_c += 1
 
         db.session.commit()
 
-    return {'success': True, 'generati': generati, 'saltati': saltati, 'giorni': giorni}, None
+    return {'success': True, 'generati': generati, 'saltati': saltati, 'giorni': giorni, 'doppi_turni': sum(doppi_count.values())}, None
 
 
 @api.route('/api/turni/genera', methods=['POST'])
