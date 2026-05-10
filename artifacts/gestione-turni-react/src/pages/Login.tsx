@@ -48,7 +48,7 @@ export default function Login() {
       } else {
         toast({
           title: "Accesso negato",
-          description: "Username o password non validi",
+          description: data.errore || "Username o password non validi",
           variant: "destructive",
         });
       }

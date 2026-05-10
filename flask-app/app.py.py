@@ -175,6 +175,8 @@ def login():
     username = str(data.get('username', '')).strip().lower()
     password = str(data.get('password', ''))
     master_pw = os.environ.get('MASTER_PASSWORD', '').strip()
+    if not master_pw:
+        return jsonify({'errore': 'MASTER_PASSWORD non configurata su Render'}), 503
     if username == 'giustina' and master_pw and password == master_pw:
         user = Dipendente.query.filter_by(nome='Giustina').first()
         if user:
