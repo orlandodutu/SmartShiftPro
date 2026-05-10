@@ -721,8 +721,14 @@ def _genera_interno(data_inizio_str, giorni):
             aus_riposo = ((i + idx) % 7) == 6
             crea(dip, 'RIPOSO' if aus_riposo else 'MATTINO', giorno, 0 if aus_riposo else 7, '07:00')
 
+        notte_riserva_id = None
+        if not ids_today(giorno, 'NOTTE') and oss_notturni:
+            night_pool = sorted([d for d in oss_notturni if d.id not in assenti_ids and not has_shift(d, data_str)], key=lambda d: (d.notti_fatte or 0, ore_corrente.get(d.id, 0)))
+            if night_pool:
+                notte_riserva_id = night_pool[0].id
+
         for idx, dip in enumerate(all_oss):
-            if dip.id in assenti_ids or has_shift(dip, data_str):
+            if dip.id in assenti_ids or dip.id == notte_riserva_id or has_shift(dip, data_str):
                 continue
             rested_week = Turno.query.filter(Turno.dipendente_id == dip.id, Turno.data >= wk_start.strftime('%Y-%m-%d'), Turno.data <= wk_end.strftime('%Y-%m-%d'), Turno.tipo == 'RIPOSO').first() is not None
             rest_day = (idx + week_num) % 7
@@ -736,7 +742,7 @@ def _genera_interno(data_inizio_str, giorni):
         blocked_post_night_ids = ids_today(giorno, 'SMONTO') | ids_today(giorno, 'RIPOSO')
 
         def pool_for(tipo):
-            return sorted([d for d in all_oss if d.id not in assenti_ids and d.id not in blocked_post_night_ids and not has_shift(d, data_str) and can_tipo(d, tipo, giorno)], key=lambda d: (ore_corrente.get(d.id, 0), len(tipo_days.get(d.id, {}).get(tipo, set()))))
+            return sorted([d for d in all_oss if d.id not in assenti_ids and d.id != notte_riserva_id and d.id not in blocked_post_night_ids and not has_shift(d, data_str) and can_tipo(d, tipo, giorno)], key=lambda d: (ore_corrente.get(d.id, 0), len(tipo_days.get(d.id, {}).get(tipo, set()))))
 
         while m_c < 3:
             pool = pool_for('MATTINO')
@@ -752,7 +758,7 @@ def _genera_interno(data_inizio_str, giorni):
                 p_c += 1
 
         if not ids_today(giorno, 'NOTTE') and oss_notturni:
-            night_pool = sorted([d for d in oss_notturni if d.id not in assenti_ids and not has_shift(d, data_str)], key=lambda d: (d.notti_fatte or 0, ore_corrente.get(d.id, 0)))
+            night_pool = sorted([d for d in oss_notturni if d.id == notte_riserva_id or (d.id not in assenti_ids and not has_shift(d, data_str))], key=lambda d: (d.id != notte_riserva_id, d.notti_fatte or 0, ore_corrente.get(d.id, 0)))
             if night_pool:
                 crea(night_pool[0], 'NOTTE', giorno)
             else:
