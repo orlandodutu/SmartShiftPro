@@ -72,7 +72,7 @@ class Dipendente(db.Model):
             'ferie': self.ferie,
             'malattia': self.malattia,
             'is_admin': self.is_admin,
-            'preferenze_turno': (self.preferenze_turno or 'MATTINO,POMERIGGIO,NOTTE').split(','),
+            'preferenze_turno': sorted(preferenze_obbligatorie(self)),
         }
 
 
@@ -102,6 +102,23 @@ class Turno(db.Model):
             'ora_inizio': self.ora_inizio or '',
             'archivio_mese': self.archivio_mese or '',
         }
+
+
+SOLO_MATTINO_NOMI = {'Anna', 'Orlando', 'Fabiana', 'Angela', 'Marina'}
+
+def preferenze_obbligatorie(dip):
+    if dip and dip.nome in SOLO_MATTINO_NOMI:
+        return {'MATTINO'}
+    if dip and dip.ruolo in ('AUSILIARIO', 'INFERMIERA'):
+        return {'MATTINO'}
+    prefs = (dip.preferenze_turno or 'MATTINO,POMERIGGIO,NOTTE').split(',') if dip else []
+    valide = {p for p in prefs if p in ('MATTINO', 'POMERIGGIO', 'NOTTE')}
+    return valide or {'MATTINO', 'POMERIGGIO', 'NOTTE'}
+
+def applica_preferenze_obbligatorie(dip):
+    prefs = preferenze_obbligatorie(dip)
+    dip.preferenze_turno = ','.join(sorted(prefs))
+    return prefs
 
 
 class Assenza(db.Model):
@@ -160,10 +177,12 @@ def inizializza_staff():
         if dip:
             dip.ruolo = ruolo
             dip.is_admin = is_admin
+            applica_preferenze_obbligatorie(dip)
     giustina = Dipendente.query.filter_by(nome='Giustina').first()
     if giustina:
         giustina.ruolo = 'DEV'
         giustina.is_admin = True
+        applica_preferenze_obbligatorie(giustina)
     if Dipendente.query.count() == len(staff_base) + 1:
         for nome, ruolo, is_admin in staff_base:
             dip = Dipendente.query.filter_by(nome=nome).first()
@@ -233,7 +252,7 @@ def aggiungi_dipendente():
     nuovo = Dipendente(
         nome=nome,
         ruolo=ruolo,
-        preferenze_turno='MATTINO,POMERIGGIO,NOTTE',
+        preferenze_turno='MATTINO' if ruolo in ('AUSILIARIO', 'INFERMIERA') or nome in SOLO_MATTINO_NOMI else 'MATTINO,POMERIGGIO,NOTTE',
     )
     db.session.add(nuovo)
     db.session.commit()
@@ -255,6 +274,7 @@ def aggiorna_dipendente(id):
     for field in ['ruolo', 'ferie', 'malattia', 'preferenze_turno']:
         if field in data:
             setattr(d, field, data[field])
+    applica_preferenze_obbligatorie(d)
     db.session.commit()
     return jsonify(d.to_dict())
 
@@ -517,7 +537,8 @@ def statistiche():
     return jsonify([{
         'id': d.id, 'nome': d.nome, 'ruolo': d.ruolo,
         'ore_totali': d.ore_totali, 'notti_fatte': d.notti_fatte,
-        'ferie': d.ferie, 'malattia': d.malattia
+        'ferie': d.ferie, 'malattia': d.malattia,
+        'preferenze_turno': sorted(preferenze_obbligatorie(d))
     } for d in dipendenti])
 
 
@@ -553,7 +574,10 @@ def _genera_interno(data_inizio_str, giorni):
         return None, 'Nessun dipendente trovato'
 
     def is_notte_eligible(d):
-        return 'NOTTE' in (d.preferenze_turno or 'MATTINO,POMERIGGIO').split(',')
+        return 'NOTTE' in preferenze_obbligatorie(d)
+
+    def can_work_tipo(d, tipo):
+        return tipo in ('RIPOSO', 'SMONTO', 'FERIE', 'MALATTIA') or tipo in preferenze_obbligatorie(d)
 
     infermieri = [d for d in all_dip if d.ruolo == 'INFERMIERA' and not d.is_admin]
     all_oss = [d for d in all_dip if d.ruolo == 'OSS' and not d.is_admin]
@@ -601,6 +625,9 @@ def _genera_interno(data_inizio_str, giorni):
             saltati += 1
             return False
         if has_shift(dip, data_str, tipo):
+            saltati += 1
+            return False
+        if not can_work_tipo(dip, tipo):
             saltati += 1
             return False
         ore = ore_override if ore_override is not None else ORE_MAP.get(tipo, 0)
@@ -977,6 +1004,8 @@ def aggiorna_preferenze(id):
     preferenze = request.json.get('preferenze', ['MATTINO', 'POMERIGGIO', 'NOTTE'])
     valide = [p for p in preferenze if p in ('MATTINO', 'POMERIGGIO', 'NOTTE')]
     nuove_prefs = set(valide) if valide else {'MATTINO', 'POMERIGGIO', 'NOTTE'}
+    if dip.nome in SOLO_MATTINO_NOMI or dip.ruolo in ('AUSILIARIO', 'INFERMIERA'):
+        nuove_prefs = {'MATTINO'}
     vecchie_prefs = set((dip.preferenze_turno or 'MATTINO,POMERIGGIO,NOTTE').split(','))
     tipi_rimossi = vecchie_prefs - nuove_prefs
 
@@ -1036,7 +1065,7 @@ def aggiorna_preferenze(id):
             # and must not already have any turno on that date
             candidati_ok = [
                 c for c in candidati
-                if tipo_rimosso in (c.preferenze_turno or 'MATTINO,POMERIGGIO,NOTTE').split(',')
+                if tipo_rimosso in preferenze_obbligatorie(c)
                 and not Turno.query.filter_by(dipendente_id=c.id, data=data_turno).first()
             ]
 
@@ -1536,7 +1565,7 @@ def legacy_elimina_turno(id):
 
 @app.route('/api/statistiche', methods=['GET'])
 def legacy_statistiche():
-    return jsonify([{'nome': d.nome, 'ruolo': d.ruolo, 'ore_totali': d.ore_totali, 'notti_fatte': d.notti_fatte, 'ferie': d.ferie, 'malattia': d.malattia} for d in Dipendente.query.all()])
+    return jsonify([{'nome': d.nome, 'ruolo': d.ruolo, 'ore_totali': d.ore_totali, 'notti_fatte': d.notti_fatte, 'ferie': d.ferie, 'malattia': d.malattia, 'preferenze_turno': sorted(preferenze_obbligatorie(d))} for d in Dipendente.query.all()])
 
 @app.route('/api/genera_report_mensile', methods=['GET'])
 def legacy_genera_pdf():
