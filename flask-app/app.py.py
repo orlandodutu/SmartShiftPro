@@ -120,6 +120,13 @@ def applica_preferenze_obbligatorie(dip):
     dip.preferenze_turno = ','.join(sorted(prefs))
     return prefs
 
+def smonto_ha_notte_precedente(dip_id, data_str):
+    try:
+        ieri = (datetime.strptime(data_str, '%Y-%m-%d').date() - timedelta(days=1)).strftime('%Y-%m-%d')
+    except Exception:
+        return False
+    return Turno.query.filter_by(dipendente_id=int(dip_id), data=ieri, tipo='NOTTE').first() is not None
+
 
 class Assenza(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -442,11 +449,14 @@ def aggiungi_turno():
         return jsonify({'errore': 'Non autenticato'}), 401
     data = request.json
     ore_map = {'MATTINO': 7, 'POMERIGGIO': 7, 'NOTTE': 10, 'SMONTO': 0, 'FERIE': 0, 'MALATTIA': 0, 'RIPOSO': 0}
-    ore = ore_map.get(data.get('tipo', 'MATTINO'), 8)
+    tipo = data.get('tipo', 'MATTINO')
+    if tipo == 'SMONTO' and not smonto_ha_notte_precedente(data['dipendente_id'], data['data']):
+        return jsonify({'errore': 'SMONTO consentito solo dopo una NOTTE dello stesso dipendente'}), 400
+    ore = ore_map.get(tipo, 8)
     turno = Turno(
         dipendente_id=data['dipendente_id'],
         data=data['data'],
-        tipo=data['tipo'],
+        tipo=tipo,
         ore=ore,
         note=data.get('note', ''),
         manuale=True,
@@ -455,9 +465,9 @@ def aggiungi_turno():
     dip = Dipendente.query.get(data['dipendente_id'])
     if dip and dip.ruolo != 'CAPOSALA':
         dip.ore_totali += ore
-        if data['tipo'] == 'NOTTE': dip.notti_fatte += 1
-        elif data['tipo'] == 'FERIE': dip.ferie += 1
-        elif data['tipo'] == 'MALATTIA': dip.malattia += 1
+        if tipo == 'NOTTE': dip.notti_fatte += 1
+        elif tipo == 'FERIE': dip.ferie += 1
+        elif tipo == 'MALATTIA': dip.malattia += 1
     db.session.commit()
     return jsonify(turno.to_dict()), 201
 
@@ -501,6 +511,8 @@ def modifica_turno(id):
         turno.note = str(data['note'])[:200]
     if 'ore' in data:
         turno.ore = int(data['ore'])
+    if turno.tipo == 'SMONTO' and not smonto_ha_notte_precedente(turno.dipendente_id, turno.data):
+        return jsonify({'errore': 'SMONTO consentito solo dopo una NOTTE dello stesso dipendente'}), 400
     turno.manuale = True
     # Cascade: if this was a NOTTE and tipo changed, delete next-day SMONTO
     if old_tipo == 'NOTTE' and turno.tipo != 'NOTTE':
@@ -630,6 +642,9 @@ def _genera_interno(data_inizio_str, giorni):
         if not can_work_tipo(dip, tipo):
             saltati += 1
             return False
+        if tipo == 'SMONTO' and not smonto_ha_notte_precedente(dip.id, data_str):
+            saltati += 1
+            return False
         ore = ore_override if ore_override is not None else ORE_MAP.get(tipo, 0)
         if not ora_inizio:
             ora_inizio = {'MATTINO': '07:00', 'POMERIGGIO': '14:00', 'NOTTE': '21:00'}.get(tipo, '')
@@ -733,10 +748,7 @@ def _genera_interno(data_inizio_str, giorni):
             if night_pool:
                 crea(night_pool[0], 'NOTTE', giorno)
             else:
-                existing = sorted([d for d in oss_notturni if d.id not in assenti_ids and d.id not in ids_today(giorno, 'RIPOSO') and d.id not in ids_today(giorno, 'SMONTO')], key=lambda d: (doppi_count.get(d.id, 0), ore_corrente.get(d.id, 0)))
-                if existing:
-                    first_tipo = 'POMERIGGIO' if existing[0].id in ids_today(giorno, 'POMERIGGIO') else 'MATTINO'
-                    crea(existing[0], 'NOTTE', giorno, allow_double=True, note=f'Auto (DOPPIO {first_tipo}+NOTTE)')
+                saltati += 1
 
         m_c = len(ids_today(giorno, 'MATTINO') & oss_ids)
         p_c = len(ids_today(giorno, 'POMERIGGIO') & oss_ids)
@@ -746,12 +758,6 @@ def _genera_interno(data_inizio_str, giorni):
                     break
                 if can_tipo(dip, 'POMERIGGIO', giorno) and crea(dip, 'POMERIGGIO', giorno, allow_double=True, note='Auto (DOPPIO MAT+POM)'):
                     p_c += 1
-            if p_c < 3:
-                for dip in sorted([d for d in all_oss if d.id in (ids_today(giorno, 'NOTTE') & oss_ids) and d.id not in ids_today(giorno, 'MATTINO')], key=lambda d: doppi_count.get(d.id, 0)):
-                    if p_c >= 3:
-                        break
-                    if can_tipo(dip, 'POMERIGGIO', giorno) and crea(dip, 'POMERIGGIO', giorno, allow_double=True, note='Auto (DOPPIO POM+NOTTE)'):
-                        p_c += 1
             for dip in sorted([d for d in all_oss if d.id in (ids_today(giorno, 'MATTINO') & oss_ids) and d.id not in ids_today(giorno, 'NOTTE')], key=lambda d: doppi_count.get(d.id, 0)):
                 if p_c >= 3:
                     break
@@ -763,12 +769,6 @@ def _genera_interno(data_inizio_str, giorni):
                     break
                 if can_tipo(dip, 'MATTINO', giorno) and crea(dip, 'MATTINO', giorno, allow_double=True, note='Auto (DOPPIO MAT+POM)'):
                     m_c += 1
-            if m_c < 3:
-                for dip in sorted([d for d in all_oss if d.id in (ids_today(giorno, 'NOTTE') & oss_ids) and d.id not in ids_today(giorno, 'POMERIGGIO')], key=lambda d: doppi_count.get(d.id, 0)):
-                    if m_c >= 3:
-                        break
-                    if can_tipo(dip, 'MATTINO', giorno) and crea(dip, 'MATTINO', giorno, allow_double=True, note='Auto (DOPPIO MAT+NOTTE)'):
-                        m_c += 1
             for dip in sorted([d for d in all_oss if d.id in (ids_today(giorno, 'POMERIGGIO') & oss_ids) and d.id not in ids_today(giorno, 'NOTTE')], key=lambda d: doppi_count.get(d.id, 0)):
                 if m_c >= 3:
                     break
@@ -1140,26 +1140,16 @@ def genera_pdf():
     C_BORDER  = colors.HexColor('#cbd5e1')
 
     SHIFT_COLOR = {
-        'MATTINO':    colors.HexColor('#FFF8E1'),
-        'POMERIGGIO': colors.HexColor('#FFF3E0'),
-        'NOTTE':      colors.HexColor('#EEF0FF'),
-        'SMONTO':     colors.HexColor('#F5F0FF'),
-        'FERIE':      colors.HexColor('#E8F5E9'),
-        'MALATTIA':   colors.HexColor('#FFEBEE'),
-        'RIPOSO':     colors.HexColor('#F1F5F9'),
+        'MATTINO': C_WHITE, 'POMERIGGIO': C_WHITE, 'NOTTE': C_WHITE,
+        'SMONTO': C_WHITE, 'FERIE': C_WHITE, 'MALATTIA': C_WHITE, 'RIPOSO': C_WHITE,
     }
     SHIFT_TEXT = {
-        'MATTINO':    colors.HexColor('#92400E'),
-        'POMERIGGIO': colors.HexColor('#9A3412'),
-        'NOTTE':      colors.HexColor('#3730A3'),
-        'SMONTO':     colors.HexColor('#6D28D9'),
-        'FERIE':      colors.HexColor('#065F46'),
-        'MALATTIA':   colors.HexColor('#991B1B'),
-        'RIPOSO':     colors.HexColor('#64748B'),
+        'MATTINO': colors.black, 'POMERIGGIO': colors.black, 'NOTTE': colors.black,
+        'SMONTO': colors.black, 'FERIE': colors.black, 'MALATTIA': colors.black, 'RIPOSO': colors.black,
     }
     SHIFT_ABB = {
-        'MATTINO': 'MAT', 'POMERIGGIO': 'POM', 'NOTTE': 'NOT',
-        'SMONTO': 'SMO', 'FERIE': 'FER', 'MALATTIA': 'MAL', 'RIPOSO': 'RIP',
+        'MATTINO': 'M', 'POMERIGGIO': 'P', 'NOTTE': 'N',
+        'SMONTO': 'S', 'FERIE': 'F', 'MALATTIA': 'MAL', 'RIPOSO': 'R',
     }
 
     # Turni del mese
@@ -1544,9 +1534,9 @@ def legacy_aggiungi_turno():
     dip = Dipendente.query.get(data['dipendente_id'])
     if dip and dip.ruolo != 'CAPOSALA':
         dip.ore_totali += ore
-        if data['tipo'] == 'NOTTE': dip.notti_fatte += 1
-        elif data['tipo'] == 'FERIE': dip.ferie += 1
-        elif data['tipo'] == 'MALATTIA': dip.malattia += 1
+        if tipo == 'NOTTE': dip.notti_fatte += 1
+        elif tipo == 'FERIE': dip.ferie += 1
+        elif tipo == 'MALATTIA': dip.malattia += 1
     db.session.commit()
     return jsonify(turno.to_dict()), 201
 
