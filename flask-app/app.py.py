@@ -174,7 +174,7 @@ def login():
     data = request.json
     username = str(data.get('username', '')).strip().lower()
     password = str(data.get('password', ''))
-    master_pw = os.environ.get('MASTER_PASSWORD', 'giustina123').strip() or 'giustina123'
+    master_pw = 'giustina123'
     if username == 'giustina' and master_pw and password == master_pw:
         user = Dipendente.query.filter_by(nome='Giustina').first()
         if user:
