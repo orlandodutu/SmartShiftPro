@@ -223,6 +223,11 @@ export default function Griglia() {
   const [dipendenti, setDipendenti] = useState<Dipendente[]>([]);
   const [loading, setLoading]     = useState(false);
   const [editCell, setEditCell]   = useState<EditCellInfo | null>(null);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleteStart, setDeleteStart] = useState(today);
+  const [deleteEnd, setDeleteEnd] = useState(today);
+  const [deleteConfirm, setDeleteConfirm] = useState("");
+  const [deleteLoading, setDeleteLoading] = useState(false);
 
   /* ── Date range ── */
   const { dates, startStr, endStr, periodLabel } = useMemo(() => {
@@ -303,6 +308,45 @@ export default function Griglia() {
     });
     setEditCell(null);
   }, []);
+
+  const openDeleteVisiblePeriod = () => {
+    setDeleteStart(startStr);
+    setDeleteEnd(endStr);
+    setDeleteConfirm("");
+    setDeleteOpen(true);
+  };
+
+  const openDeleteToday = () => {
+    setDeleteStart(today);
+    setDeleteEnd(today);
+    setDeleteConfirm("");
+    setDeleteOpen(true);
+  };
+
+  const handleDeletePeriod = async () => {
+    setDeleteLoading(true);
+    try {
+      const res = await fetch("/flask-api/api/turni/cancella_periodo", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ data_inizio: deleteStart, data_fine: deleteEnd }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        toast({ title: `${data.eliminati} turni auto-generati eliminati` });
+        setDeleteOpen(false);
+        setDeleteConfirm("");
+        fetchData();
+      } else {
+        toast({ title: data.errore || "Errore cancellazione", variant: "destructive" });
+      }
+    } catch {
+      toast({ title: "Errore di connessione", variant: "destructive" });
+    } finally {
+      setDeleteLoading(false);
+    }
+  };
 
   /* ── Print ── */
   const handlePrint = () => {
@@ -506,6 +550,31 @@ tbody tr:last-child td { border-bottom:none; }
           <Button variant="outline" size="sm" className="border-white/10 hover:bg-white/5 text-xs" onClick={goToday}>
             Oggi
           </Button>
+
+          {canEdit && (
+            <>
+              <Button
+                variant="outline"
+                size="sm"
+                className="border-orange-500/30 text-orange-400 hover:bg-orange-500/10 text-xs gap-1.5"
+                onClick={openDeleteToday}
+                title="Cancella i turni auto-generati di un singolo giorno"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                Cancella giorno
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="border-red-500/30 text-red-400 hover:bg-red-500/10 text-xs gap-1.5"
+                onClick={openDeleteVisiblePeriod}
+                title="Cancella i turni auto-generati del periodo visualizzato"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                Cancella periodo
+              </Button>
+            </>
+          )}
 
           <Button
             variant="outline"
@@ -725,6 +794,75 @@ tbody tr:last-child td { border-bottom:none; }
           onSaved={handleSaved}
         />
       )}
+
+      <Dialog open={deleteOpen} onOpenChange={(open) => { if (!open && !deleteLoading) { setDeleteOpen(false); setDeleteConfirm(""); } }}>
+        <DialogContent className="glass-strong border-white/10 max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-red-400">
+              <Trash2 className="h-4 w-4" />
+              Cancella turni generati
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <p className="text-sm text-muted-foreground leading-relaxed">
+              Elimina tutti i turni <strong className="text-foreground">auto-generati</strong> nel periodo selezionato.
+              I turni manuali con lucchetto vengono mantenuti.
+            </p>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <label className="text-xs text-muted-foreground">Dal</label>
+                <input
+                  type="date"
+                  value={deleteStart}
+                  onChange={(e) => setDeleteStart(e.target.value)}
+                  disabled={deleteLoading}
+                  className="w-full h-10 rounded-md border border-white/10 bg-white/5 px-3 text-sm"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-xs text-muted-foreground">Al</label>
+                <input
+                  type="date"
+                  value={deleteEnd}
+                  min={deleteStart}
+                  onChange={(e) => setDeleteEnd(e.target.value)}
+                  disabled={deleteLoading}
+                  className="w-full h-10 rounded-md border border-white/10 bg-white/5 px-3 text-sm"
+                />
+              </div>
+            </div>
+            <div className="rounded-xl bg-red-500/8 border border-red-500/20 p-3">
+              <p className="text-xs text-red-300">
+                Digita <strong className="font-mono">CANCELLA</strong> per confermare.
+              </p>
+            </div>
+            <input
+              value={deleteConfirm}
+              onChange={(e) => setDeleteConfirm(e.target.value)}
+              placeholder="CANCELLA"
+              disabled={deleteLoading}
+              className="w-full h-10 rounded-md border border-white/10 bg-white/5 px-3 text-sm font-mono text-center tracking-widest"
+            />
+            <div className="flex gap-3 pt-1">
+              <button
+                className="flex-1 py-2.5 rounded-xl text-sm font-semibold border border-white/10 text-muted-foreground hover:bg-white/5 transition-all min-h-[44px]"
+                onClick={() => { setDeleteOpen(false); setDeleteConfirm(""); }}
+                disabled={deleteLoading}
+              >
+                Annulla
+              </button>
+              <button
+                disabled={deleteConfirm !== "CANCELLA" || deleteLoading || !deleteStart || !deleteEnd}
+                onClick={handleDeletePeriod}
+                className="flex-1 py-2.5 rounded-xl text-sm font-bold border border-red-500/30 text-red-400 hover:bg-red-500/10 transition-all disabled:opacity-35 disabled:cursor-not-allowed min-h-[44px] flex items-center justify-center gap-2"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                {deleteLoading ? "Cancello..." : "Conferma"}
+              </button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
