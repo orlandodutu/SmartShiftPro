@@ -27,16 +27,19 @@ const CELL: Record<string, { label: string; cls: string }> = {
 const SHIFT_TYPES = ["MATTINO","POMERIGGIO","NOTTE","SMONTO","FERIE","MALATTIA","RIPOSO"] as const;
 
 /* ── Date helpers ── */
+function formatLocalDate(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
 function getMonday(dateStr: string): string {
   const d = new Date(dateStr + "T00:00:00");
   const dow = d.getDay();
   d.setDate(d.getDate() + (dow === 0 ? -6 : 1 - dow));
-  return d.toISOString().split("T")[0];
+  return formatLocalDate(d);
 }
 function addDays(dateStr: string, n: number): string {
   const d = new Date(dateStr + "T00:00:00");
   d.setDate(d.getDate() + n);
-  return d.toISOString().split("T")[0];
+  return formatLocalDate(d);
 }
 function monthStart(dateStr: string): string {
   const d = new Date(dateStr + "T00:00:00");
@@ -266,7 +269,7 @@ export default function Griglia() {
   const { user } = useAuth();
   const { theme } = useTheme();
   const isLight = theme === "light";
-  const today = new Date().toISOString().split("T")[0];
+  const today = formatLocalDate(new Date());
   const canEdit = !!(user?.is_admin || user?.ruolo === "CAPOSALA");
 
   const [viewMode, setViewMode]   = useState<"settimana" | "mese">("settimana");
@@ -346,7 +349,7 @@ export default function Griglia() {
     } else {
       const d = new Date(anchorDate + "T00:00:00");
       d.setMonth(d.getMonth() + dir);
-      setAnchorDate(d.toISOString().split("T")[0]);
+      setAnchorDate(formatLocalDate(d));
     }
   };
   const goToday = () => setAnchorDate(viewMode === "settimana" ? getMonday(today) : monthStart(today));
