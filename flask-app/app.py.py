@@ -883,7 +883,14 @@ def _genera_interno(data_inizio_str, giorni):
 
         for dip in all_dip:
             if dip.id not in assenti_ids and not has_shift(dip, data_str):
-                crea(dip, 'RIPOSO', giorno, ore_override=0)
+                rested_week = Turno.query.filter(
+                    Turno.dipendente_id == dip.id,
+                    Turno.data >= wk_start.strftime('%Y-%m-%d'),
+                    Turno.data <= data_str,
+                    Turno.tipo.in_(['RIPOSO', 'SMONTO'])
+                ).first() is not None
+                if not rested_week:
+                    crea(dip, 'RIPOSO', giorno, ore_override=0)
 
         db.session.flush()
 
