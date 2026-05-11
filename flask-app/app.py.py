@@ -105,12 +105,16 @@ class Turno(db.Model):
 
 
 SOLO_MATTINO_NOMI = {'Anna', 'Orlando', 'Fabiana', 'Angela', 'Marina'}
+NO_NOTTE_NOMI = {'Roberto', 'Vittoria', 'Stefania', 'Stefania 2'}
 
 def preferenze_obbligatorie(dip):
     if dip and (dip.nome in SOLO_MATTINO_NOMI or dip.ruolo in ('AUSILIARIO', 'INFERMIERA')):
         return {'MATTINO'}
     prefs = (dip.preferenze_turno or '').split(',') if dip else []
     valide = {p for p in prefs if p in ('MATTINO', 'POMERIGGIO', 'NOTTE')}
+    if dip and dip.nome in NO_NOTTE_NOMI:
+        valide.discard('NOTTE')
+        return valide or {'MATTINO', 'POMERIGGIO'}
     return valide or {'MATTINO', 'POMERIGGIO', 'NOTTE'}
 
 def applica_preferenze_obbligatorie(dip):
@@ -119,6 +123,8 @@ def applica_preferenze_obbligatorie(dip):
         return {'MATTINO'}
     prefs = preferenze_obbligatorie(dip)
     if dip and not dip.preferenze_turno:
+        dip.preferenze_turno = ','.join(sorted(prefs))
+    elif dip and dip.nome in NO_NOTTE_NOMI and 'NOTTE' in (dip.preferenze_turno or '').split(','):
         dip.preferenze_turno = ','.join(sorted(prefs))
     return prefs
 
@@ -624,6 +630,7 @@ def _genera_interno(data_inizio_str, giorni):
     consec_work = {d.id: 0 for d in all_dip}
     doppi_count = {d.id: 0 for d in all_dip}
     notti_periodo = {d.id: 0 for d in oss_notturni}
+    chain_nsp_count = {d.id: 0 for d in all_oss}
 
     def has_shift(dip, data_str, tipo=None):
         q = Turno.query.filter_by(dipendente_id=dip.id, data=data_str)
@@ -678,6 +685,11 @@ def _genera_interno(data_inizio_str, giorni):
         if tipo == 'NOTTE':
             dip.notti_fatte += 1
             notti_periodo[dip.id] = notti_periodo.get(dip.id, 0) + 1
+        if tipo == 'POMERIGGIO':
+            ieri = (giorno - timedelta(days=1)).strftime('%Y-%m-%d')
+            avantieri = (giorno - timedelta(days=2)).strftime('%Y-%m-%d')
+            if Turno.query.filter_by(dipendente_id=dip.id, data=ieri, tipo='SMONTO').first() and Turno.query.filter_by(dipendente_id=dip.id, data=avantieri, tipo='NOTTE').first():
+                chain_nsp_count[dip.id] = chain_nsp_count.get(dip.id, 0) + 1
         track(dip, tipo, giorno)
         generati += 1
         return True
@@ -758,8 +770,15 @@ def _genera_interno(data_inizio_str, giorni):
 
         blocked_post_night_ids = ids_today(giorno, 'SMONTO') | ids_today(giorno, 'RIPOSO')
 
+        def score_tipo(dip, tipo):
+            return (
+                chain_nsp_count.get(dip.id, 0) if tipo == 'POMERIGGIO' and dip.id in smonto_ieri else 0,
+                len(tipo_days.get(dip.id, {}).get(tipo, set())),
+                ore_corrente.get(dip.id, 0),
+            )
+
         def pool_for(tipo):
-            return sorted([d for d in all_oss if d.id not in assenti_ids and d.id != notte_riserva_id and d.id not in blocked_post_night_ids and not has_shift(d, data_str) and can_tipo(d, tipo, giorno)], key=lambda d: (ore_corrente.get(d.id, 0), len(tipo_days.get(d.id, {}).get(tipo, set()))))
+            return sorted([d for d in all_oss if d.id not in assenti_ids and d.id != notte_riserva_id and d.id not in blocked_post_night_ids and not has_shift(d, data_str) and can_tipo(d, tipo, giorno)], key=lambda d: score_tipo(d, tipo))
 
         while m_c < 3:
             pool = pool_for('MATTINO')
@@ -784,12 +803,12 @@ def _genera_interno(data_inizio_str, giorni):
         m_c = len(ids_today(giorno, 'MATTINO') & oss_ids)
         p_c = len(ids_today(giorno, 'POMERIGGIO') & oss_ids)
         if p_c < 3:
-            for dip in sorted([d for d in all_oss if d.id in (ids_today(giorno, 'MATTINO') & oss_ids) and d.id not in ids_today(giorno, 'NOTTE')], key=lambda d: doppi_count.get(d.id, 0)):
+            for dip in sorted([d for d in all_oss if d.id in (ids_today(giorno, 'MATTINO') & oss_ids) and d.id not in ids_today(giorno, 'NOTTE')], key=lambda d: (chain_nsp_count.get(d.id, 0) if d.id in smonto_ieri else 0, doppi_count.get(d.id, 0))):
                 if p_c >= 3:
                     break
                 if can_tipo(dip, 'POMERIGGIO', giorno) and crea(dip, 'POMERIGGIO', giorno, allow_double=True, note='Auto (DOPPIO MAT+POM)'):
                     p_c += 1
-            for dip in sorted([d for d in all_oss if d.id in (ids_today(giorno, 'MATTINO') & oss_ids) and d.id not in ids_today(giorno, 'NOTTE')], key=lambda d: doppi_count.get(d.id, 0)):
+            for dip in sorted([d for d in all_oss if d.id in (ids_today(giorno, 'MATTINO') & oss_ids) and d.id not in ids_today(giorno, 'NOTTE')], key=lambda d: (chain_nsp_count.get(d.id, 0) if d.id in smonto_ieri else 0, doppi_count.get(d.id, 0))):
                 if p_c >= 3:
                     break
                 if crea(dip, 'POMERIGGIO', giorno, allow_double=True, note='Auto (DOPPIO MAT+POM COPERTURA)'):
@@ -816,7 +835,7 @@ def _genera_interno(data_inizio_str, giorni):
                 if crea(dip, 'MATTINO', giorno, allow_double=True, note='Auto (DOPPIO MAT COPERTURA)'):
                     m_c += 1
         if p_c < 3:
-            for dip in sorted([d for d in all_oss if d.id not in assenti_ids and d.id not in blocked_ids and d.id not in ids_today(giorno, 'POMERIGGIO')], key=lambda d: doppi_count.get(d.id, 0)):
+            for dip in sorted([d for d in all_oss if d.id not in assenti_ids and d.id not in blocked_ids and d.id not in ids_today(giorno, 'POMERIGGIO')], key=lambda d: (chain_nsp_count.get(d.id, 0) if d.id in smonto_ieri else 0, doppi_count.get(d.id, 0))):
                 if p_c >= 3:
                     break
                 if crea(dip, 'POMERIGGIO', giorno, allow_double=True, note='Auto (DOPPIO POM COPERTURA)'):
@@ -844,8 +863,8 @@ def genera_turni():
             start = date.today()
             data_inizio = start.strftime('%Y-%m-%d')
         import calendar as _cal
-        giorni = _cal.monthrange(start.year, start.month)[1]
-        data_inizio = date(start.year, start.month, 1).strftime('%Y-%m-%d')
+        giorni = _cal.monthrange(start.year, start.month)[1] - start.day + 1
+        data_inizio = start.strftime('%Y-%m-%d')
     else:
         giorni = 1 if modalita == 'giorno' else 7
     result, err = _genera_interno(data_inizio, giorni)
@@ -1048,6 +1067,9 @@ def aggiorna_preferenze(id):
     nuove_prefs = set(valide) if valide else {'MATTINO', 'POMERIGGIO', 'NOTTE'}
     if dip.nome in SOLO_MATTINO_NOMI or dip.ruolo in ('AUSILIARIO', 'INFERMIERA'):
         nuove_prefs = {'MATTINO'}
+    elif dip.nome in NO_NOTTE_NOMI:
+        nuove_prefs.discard('NOTTE')
+        nuove_prefs = nuove_prefs or {'MATTINO', 'POMERIGGIO'}
     vecchie_prefs = set((dip.preferenze_turno or 'MATTINO,POMERIGGIO,NOTTE').split(','))
     tipi_rimossi = vecchie_prefs - nuove_prefs
 
