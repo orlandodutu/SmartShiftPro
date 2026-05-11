@@ -615,7 +615,7 @@ def _genera_interno(data_inizio_str, giorni):
     generati = 0
     saltati = 0
     ore_corrente = {d.id: (d.ore_totali or 0) for d in all_dip}
-    max_ore_mensili_oss = 190
+    max_ore_mensili_oss = 200
     ore_mensili = {}
     mese_cursor = date(data_inizio.year, data_inizio.month, 1)
     while mese_cursor <= data_fine:
@@ -841,7 +841,7 @@ def _genera_interno(data_inizio_str, giorni):
         m_c = len(ids_today(giorno, 'MATTINO') & oss_ids)
         p_c = len(ids_today(giorno, 'POMERIGGIO') & oss_ids)
         mese_key = giorno.strftime('%Y-%m')
-        target_p = 4 if any(ore_mensili.get((d.id, mese_key), 0) < 173 for d in all_oss) else 3
+        target_p = 3
         if p_c < target_p:
             for dip in sorted([d for d in all_oss if d.id in (ids_today(giorno, 'MATTINO') & oss_ids) and d.id not in ids_today(giorno, 'NOTTE')], key=lambda d: (chain_nsp_count.get(d.id, 0) if d.id in smonto_ieri else 0, ore_mensili.get((d.id, mese_key), 0), doppi_count.get(d.id, 0))):
                 if p_c >= target_p:
@@ -880,6 +880,10 @@ def _genera_interno(data_inizio_str, giorni):
                     break
                 if crea(dip, 'POMERIGGIO', giorno, allow_double=True, note='Auto (DOPPIO POM COPERTURA)'):
                     p_c += 1
+
+        for dip in all_dip:
+            if dip.id not in assenti_ids and not has_shift(dip, data_str):
+                crea(dip, 'RIPOSO', giorno, ore_override=0)
 
         db.session.flush()
 
