@@ -614,6 +614,7 @@ def _genera_interno(data_inizio_str, giorni):
 
     generati = 0
     saltati = 0
+    warnings = []
     ore_corrente = {d.id: (d.ore_totali or 0) for d in all_dip}
     max_ore_mensili_oss = 200
     ore_mensili = {}
@@ -919,10 +920,20 @@ def _genera_interno(data_inizio_str, giorni):
                 if not rested_week:
                     crea(dip, 'RIPOSO', giorno, ore_override=0)
 
+        m_c = len(ids_today(giorno, 'MATTINO') & oss_ids)
+        p_c = len(ids_today(giorno, 'POMERIGGIO') & oss_ids)
+        n_c = len(ids_today(giorno, 'NOTTE') & oss_ids)
+        if m_c < 4:
+            warnings.append(f"{data_str}: solo {m_c} MATTINO (target 4) — limite ore mensili")
+        if p_c < 3:
+            warnings.append(f"{data_str}: solo {p_c} POMERIGGIO (target 3) — limite ore mensili")
+        if n_c < 1:
+            warnings.append(f"{data_str}: nessuna NOTTE assegnata")
+
         db.session.flush()
 
     db.session.commit()
-    return {'success': True, 'generati': generati, 'saltati': saltati, 'giorni': giorni, 'doppi_turni': sum(doppi_count.values())}, None
+    return {'success': True, 'generati': generati, 'saltati': saltati, 'giorni': giorni, 'doppi_turni': sum(doppi_count.values()), 'warnings': warnings}, None
 
 
 @api.route('/api/turni/genera', methods=['POST'])
