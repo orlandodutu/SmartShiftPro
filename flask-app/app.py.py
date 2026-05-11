@@ -636,6 +636,19 @@ def _genera_interno(data_inizio_str, giorni):
         mese_cursor = prossimo_mese
     tipo_days = {}
     consec_work = {d.id: 0 for d in all_dip}
+    # Initialize consec_work from pre-existing shifts before generation
+    for dip in all_dip:
+        count = 0
+        check_day = data_inizio - timedelta(days=1)
+        while True:
+            ds = check_day.strftime('%Y-%m-%d')
+            turno = Turno.query.filter_by(dipendente_id=dip.id, data=ds).first()
+            if turno and turno.tipo in ('MATTINO', 'POMERIGGIO', 'NOTTE'):
+                count += 1
+                check_day -= timedelta(days=1)
+            else:
+                break
+        consec_work[dip.id] = count
     doppi_count = {d.id: 0 for d in all_dip}
     notti_periodo = {d.id: 0 for d in oss_notturni}
     chain_nsp_count = {d.id: 0 for d in all_oss}
@@ -723,6 +736,7 @@ def _genera_interno(data_inizio_str, giorni):
         week_num = i // 7
         wk_start = giorno - timedelta(days=weekday)
         wk_end = wk_start + timedelta(days=6)
+        needs_rest = {}
 
         assenze_oggi = Assenza.query.filter(Assenza.data_inizio <= data_str, Assenza.data_fine >= data_str).all()
         assenti_ids = {a.dipendente_id for a in assenze_oggi}
@@ -771,7 +785,7 @@ def _genera_interno(data_inizio_str, giorni):
                 notte_riserva_id = night_pool[0].id
 
         for idx, dip in enumerate(all_oss):
-            if dip.id in assenti_ids or dip.id == notte_riserva_id or has_shift(dip, data_str):
+            if dip.id in assenti_ids or has_shift(dip, data_str):
                 continue
             if dip.id in smonto_ieri and not (dip.id in notte_due and dip.id in notte_tre):
                 continue
@@ -781,13 +795,15 @@ def _genera_interno(data_inizio_str, giorni):
                 Turno.data <= wk_end.strftime('%Y-%m-%d'),
                 Turno.tipo == 'RIPOSO'
             ).first() is not None
+            needs_rest[dip.id] = not rested_week
             rest_day = (idx + week_num) % 7
             if consec_work.get(dip.id, 0) >= 6 or (not rested_week and weekday == rest_day):
                 crea(dip, 'RIPOSO', giorno)
-        if weekday >= 5 and i >= 6:
+                needs_rest[dip.id] = False
+        if i >= 6:
             window_start = (giorno - timedelta(days=6)).strftime('%Y-%m-%d')
             for dip in sorted(all_oss, key=lambda d: (consec_work.get(d.id, 0), ore_corrente.get(d.id, 0)), reverse=True):
-                if dip.id in assenti_ids or dip.id == notte_riserva_id or has_shift(dip, data_str):
+                if dip.id in assenti_ids or has_shift(dip, data_str):
                     continue
                 if dip.id in smonto_ieri and not (dip.id in notte_due and dip.id in notte_tre):
                     continue
@@ -799,6 +815,7 @@ def _genera_interno(data_inizio_str, giorni):
                 ).first() is not None
                 if not rested_7_days:
                     crea(dip, 'RIPOSO', giorno)
+                    needs_rest[dip.id] = False
 
         oss_ids = {d.id for d in all_oss}
         m_c = len(ids_today(giorno, 'MATTINO') & oss_ids)
@@ -809,6 +826,7 @@ def _genera_interno(data_inizio_str, giorni):
         def score_tipo(dip, tipo):
             mese_key = giorno.strftime('%Y-%m')
             return (
+                0 if not needs_rest.get(dip.id, False) else 1,
                 ore_mensili.get((dip.id, mese_key), 0),
                 chain_nsp_count.get(dip.id, 0) if tipo == 'POMERIGGIO' and dip.id in smonto_ieri else 0,
                 len(tipo_days.get(dip.id, {}).get(tipo, set())),
@@ -816,7 +834,7 @@ def _genera_interno(data_inizio_str, giorni):
             )
 
         def pool_for(tipo):
-            return sorted([d for d in all_oss if d.id not in assenti_ids and d.id != notte_riserva_id and d.id not in blocked_post_night_ids and not has_shift(d, data_str) and can_tipo(d, tipo, giorno)], key=lambda d: score_tipo(d, tipo))
+            return sorted([d for d in all_oss if d.id not in assenti_ids and d.id not in blocked_post_night_ids and not needs_rest.get(d.id, False) and not has_shift(d, data_str) and can_tipo(d, tipo, giorno)], key=lambda d: score_tipo(d, tipo))
 
         for dip in pool_for('MATTINO'):
             if m_c >= 4:
@@ -829,10 +847,10 @@ def _genera_interno(data_inizio_str, giorni):
             if crea(dip, 'POMERIGGIO', giorno):
                 p_c += 1
 
-        doppi_ids = ids_today(giorno, 'MATTINO') & ids_today(giorno, 'POMERIGGIO')
+        gia_in_turno_giorno = ids_today(giorno, 'MATTINO') | ids_today(giorno, 'POMERIGGIO')
         if not ids_today(giorno, 'NOTTE') and oss_notturni:
             mese_key = giorno.strftime('%Y-%m')
-            night_pool = sorted([d for d in oss_notturni if d.id not in doppi_ids and (d.id == notte_riserva_id or (d.id not in assenti_ids and not has_shift(d, data_str)))], key=lambda d: (d.id != notte_riserva_id, notti_periodo.get(d.id, 0), d.notti_fatte or 0, ore_mensili.get((d.id, mese_key), 0), ore_corrente.get(d.id, 0)))
+            night_pool = sorted([d for d in oss_notturni if d.id not in gia_in_turno_giorno and not needs_rest.get(d.id, False) and d.id not in assenti_ids and not has_shift(d, data_str)], key=lambda d: (d.id != notte_riserva_id, notti_periodo.get(d.id, 0), d.notti_fatte or 0, ore_mensili.get((d.id, mese_key), 0), ore_corrente.get(d.id, 0)))
             if night_pool:
                 crea(night_pool[0], 'NOTTE', giorno)
             else:
@@ -846,26 +864,26 @@ def _genera_interno(data_inizio_str, giorni):
         MAX_DOPPI = 2
         soft_cap_doppi = 180
         if p_c < target_p and doppi_oggi < MAX_DOPPI:
-            for dip in sorted([d for d in all_oss if d.id in (ids_today(giorno, 'MATTINO') & oss_ids) and d.id not in ids_today(giorno, 'NOTTE') and ore_mensili.get((d.id, mese_key), 0) <= soft_cap_doppi], key=lambda d: (chain_nsp_count.get(d.id, 0) if d.id in smonto_ieri else 0, ore_mensili.get((d.id, mese_key), 0), doppi_count.get(d.id, 0))):
+            for dip in sorted([d for d in all_oss if d.id in (ids_today(giorno, 'MATTINO') & oss_ids) and d.id not in ids_today(giorno, 'NOTTE') and not needs_rest.get(d.id, False) and ore_mensili.get((d.id, mese_key), 0) <= soft_cap_doppi], key=lambda d: (chain_nsp_count.get(d.id, 0) if d.id in smonto_ieri else 0, ore_mensili.get((d.id, mese_key), 0), doppi_count.get(d.id, 0))):
                 if p_c >= target_p or doppi_oggi >= MAX_DOPPI:
                     break
                 if can_tipo(dip, 'POMERIGGIO', giorno) and crea(dip, 'POMERIGGIO', giorno, allow_double=True, note='Auto (DOPPIO MAT+POM)'):
                     p_c += 1
                     doppi_oggi += 1
-            for dip in sorted([d for d in all_oss if d.id in (ids_today(giorno, 'MATTINO') & oss_ids) and d.id not in ids_today(giorno, 'NOTTE') and ore_mensili.get((d.id, mese_key), 0) <= soft_cap_doppi], key=lambda d: (chain_nsp_count.get(d.id, 0) if d.id in smonto_ieri else 0, ore_mensili.get((d.id, mese_key), 0), doppi_count.get(d.id, 0))):
+            for dip in sorted([d for d in all_oss if d.id in (ids_today(giorno, 'MATTINO') & oss_ids) and d.id not in ids_today(giorno, 'NOTTE') and not needs_rest.get(d.id, False) and ore_mensili.get((d.id, mese_key), 0) <= soft_cap_doppi], key=lambda d: (chain_nsp_count.get(d.id, 0) if d.id in smonto_ieri else 0, ore_mensili.get((d.id, mese_key), 0), doppi_count.get(d.id, 0))):
                 if p_c >= target_p or doppi_oggi >= MAX_DOPPI:
                     break
                 if crea(dip, 'POMERIGGIO', giorno, allow_double=True, note='Auto (DOPPIO MAT+POM COPERTURA)'):
                     p_c += 1
                     doppi_oggi += 1
         if m_c < 4 and doppi_oggi < MAX_DOPPI:
-            for dip in sorted([d for d in all_oss if d.id in (ids_today(giorno, 'POMERIGGIO') & oss_ids) and d.id not in ids_today(giorno, 'NOTTE') and ore_mensili.get((d.id, mese_key), 0) <= soft_cap_doppi], key=lambda d: (ore_mensili.get((d.id, mese_key), 0), doppi_count.get(d.id, 0))):
+            for dip in sorted([d for d in all_oss if d.id in (ids_today(giorno, 'POMERIGGIO') & oss_ids) and d.id not in ids_today(giorno, 'NOTTE') and not needs_rest.get(d.id, False) and ore_mensili.get((d.id, mese_key), 0) <= soft_cap_doppi], key=lambda d: (ore_mensili.get((d.id, mese_key), 0), doppi_count.get(d.id, 0))):
                 if m_c >= 4 or doppi_oggi >= MAX_DOPPI:
                     break
                 if can_tipo(dip, 'MATTINO', giorno) and crea(dip, 'MATTINO', giorno, allow_double=True, note='Auto (DOPPIO MAT+POM)'):
                     m_c += 1
                     doppi_oggi += 1
-            for dip in sorted([d for d in all_oss if d.id in (ids_today(giorno, 'POMERIGGIO') & oss_ids) and d.id not in ids_today(giorno, 'NOTTE') and ore_mensili.get((d.id, mese_key), 0) <= soft_cap_doppi], key=lambda d: (ore_mensili.get((d.id, mese_key), 0), doppi_count.get(d.id, 0))):
+            for dip in sorted([d for d in all_oss if d.id in (ids_today(giorno, 'POMERIGGIO') & oss_ids) and d.id not in ids_today(giorno, 'NOTTE') and not needs_rest.get(d.id, False) and ore_mensili.get((d.id, mese_key), 0) <= soft_cap_doppi], key=lambda d: (ore_mensili.get((d.id, mese_key), 0), doppi_count.get(d.id, 0))):
                 if m_c >= 4 or doppi_oggi >= MAX_DOPPI:
                     break
                 if crea(dip, 'MATTINO', giorno, allow_double=True, note='Auto (DOPPIO MAT+POM COPERTURA)'):
@@ -875,14 +893,15 @@ def _genera_interno(data_inizio_str, giorni):
         m_c = len(ids_today(giorno, 'MATTINO') & oss_ids)
         p_c = len(ids_today(giorno, 'POMERIGGIO') & oss_ids)
         blocked_ids = ids_today(giorno, 'RIPOSO') | ids_today(giorno, 'SMONTO')
+        notte_ids_oggi = ids_today(giorno, 'NOTTE')
         if m_c < 4:
-            for dip in sorted([d for d in all_oss if d.id not in assenti_ids and d.id not in blocked_ids and d.id not in ids_today(giorno, 'MATTINO')], key=lambda d: (ore_mensili.get((d.id, mese_key), 0), doppi_count.get(d.id, 0))):
+            for dip in sorted([d for d in all_oss if d.id not in assenti_ids and d.id not in blocked_ids and d.id not in notte_ids_oggi and not needs_rest.get(d.id, False) and d.id not in ids_today(giorno, 'MATTINO')], key=lambda d: (ore_mensili.get((d.id, mese_key), 0), doppi_count.get(d.id, 0))):
                 if m_c >= 4:
                     break
                 if crea(dip, 'MATTINO', giorno, allow_double=True, note='Auto (DOPPIO MAT COPERTURA)'):
                     m_c += 1
         if p_c < target_p:
-            for dip in sorted([d for d in all_oss if d.id not in assenti_ids and d.id not in blocked_ids and d.id not in ids_today(giorno, 'POMERIGGIO')], key=lambda d: (chain_nsp_count.get(d.id, 0) if d.id in smonto_ieri else 0, ore_mensili.get((d.id, mese_key), 0), doppi_count.get(d.id, 0))):
+            for dip in sorted([d for d in all_oss if d.id not in assenti_ids and d.id not in blocked_ids and d.id not in notte_ids_oggi and not needs_rest.get(d.id, False) and d.id not in ids_today(giorno, 'POMERIGGIO')], key=lambda d: (chain_nsp_count.get(d.id, 0) if d.id in smonto_ieri else 0, ore_mensili.get((d.id, mese_key), 0), doppi_count.get(d.id, 0))):
                 if p_c >= target_p:
                     break
                 if crea(dip, 'POMERIGGIO', giorno, allow_double=True, note='Auto (DOPPIO POM COPERTURA)'):
@@ -892,15 +911,15 @@ def _genera_interno(data_inizio_str, giorni):
         m_c = len(ids_today(giorno, 'MATTINO') & oss_ids)
         p_c = len(ids_today(giorno, 'POMERIGGIO') & oss_ids)
         if not (ids_today(giorno, 'NOTTE') & oss_ids) and oss_notturni:
-            for dip in sorted([d for d in oss_notturni if d.id not in doppi_ids and d.id not in assenti_ids and not has_shift(d, data_str) and can_tipo(d, 'NOTTE', giorno)], key=lambda d: ore_mensili.get((d.id, mese_key), 0)):
+            for dip in sorted([d for d in oss_notturni if d.id not in gia_in_turno_giorno and not needs_rest.get(d.id, False) and d.id not in assenti_ids and not has_shift(d, data_str) and can_tipo(d, 'NOTTE', giorno)], key=lambda d: ore_mensili.get((d.id, mese_key), 0)):
                 crea(dip, 'NOTTE', giorno, forza=True)
                 break
-        for dip in sorted([d for d in all_oss if d.id not in assenti_ids and not has_shift(d, data_str) and can_tipo(d, 'MATTINO', giorno)], key=lambda d: ore_mensili.get((d.id, mese_key), 0)):
+        for dip in sorted([d for d in all_oss if d.id not in assenti_ids and not needs_rest.get(d.id, False) and not has_shift(d, data_str) and can_tipo(d, 'MATTINO', giorno)], key=lambda d: ore_mensili.get((d.id, mese_key), 0)):
             if m_c >= 4:
                 break
             if crea(dip, 'MATTINO', giorno, forza=True):
                 m_c += 1
-        for dip in sorted([d for d in all_oss if d.id not in assenti_ids and not has_shift(d, data_str) and can_tipo(d, 'POMERIGGIO', giorno)], key=lambda d: ore_mensili.get((d.id, mese_key), 0)):
+        for dip in sorted([d for d in all_oss if d.id not in assenti_ids and not needs_rest.get(d.id, False) and not has_shift(d, data_str) and can_tipo(d, 'POMERIGGIO', giorno)], key=lambda d: ore_mensili.get((d.id, mese_key), 0)):
             if p_c >= 3:
                 break
             if crea(dip, 'POMERIGGIO', giorno, forza=True):
