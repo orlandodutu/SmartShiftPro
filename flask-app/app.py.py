@@ -763,10 +763,30 @@ def _genera_interno(data_inizio_str, giorni):
                 continue
             if dip.id in smonto_ieri and not (dip.id in notte_due and dip.id in notte_tre):
                 continue
-            rested_week = Turno.query.filter(Turno.dipendente_id == dip.id, Turno.data >= wk_start.strftime('%Y-%m-%d'), Turno.data <= wk_end.strftime('%Y-%m-%d'), Turno.tipo == 'RIPOSO').first() is not None
+            rested_week = Turno.query.filter(
+                Turno.dipendente_id == dip.id,
+                Turno.data >= wk_start.strftime('%Y-%m-%d'),
+                Turno.data <= wk_end.strftime('%Y-%m-%d'),
+                Turno.tipo.in_(['RIPOSO', 'SMONTO'])
+            ).first() is not None
             rest_day = (idx + week_num) % 7
             if consec_work.get(dip.id, 0) >= 6 or (not rested_week and weekday == rest_day):
                 crea(dip, 'RIPOSO', giorno)
+        if weekday >= 5 and i >= 6:
+            window_start = (giorno - timedelta(days=6)).strftime('%Y-%m-%d')
+            for dip in sorted(all_oss, key=lambda d: (consec_work.get(d.id, 0), ore_corrente.get(d.id, 0)), reverse=True):
+                if dip.id in assenti_ids or dip.id == notte_riserva_id or has_shift(dip, data_str):
+                    continue
+                if dip.id in smonto_ieri and not (dip.id in notte_due and dip.id in notte_tre):
+                    continue
+                rested_7_days = Turno.query.filter(
+                    Turno.dipendente_id == dip.id,
+                    Turno.data >= window_start,
+                    Turno.data <= data_str,
+                    Turno.tipo.in_(['RIPOSO', 'SMONTO'])
+                ).first() is not None
+                if not rested_7_days:
+                    crea(dip, 'RIPOSO', giorno)
 
         oss_ids = {d.id for d in all_oss}
         m_c = len(ids_today(giorno, 'MATTINO') & oss_ids)
