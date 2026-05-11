@@ -572,7 +572,6 @@ def _genera_interno(data_inizio_str, giorni):
         t.data for t in Turno.query.filter(
             Turno.data >= data_inizio.strftime('%Y-%m-%d'),
             Turno.data <= data_fine.strftime('%Y-%m-%d'),
-            Turno.manuale == True
         ).all()
     }
     turni_auto_esistenti = Turno.query.filter(
@@ -882,8 +881,9 @@ def _genera_interno(data_inizio_str, giorni):
                 if crea(dip, 'POMERIGGIO', giorno, allow_double=True, note='Auto (DOPPIO POM COPERTURA)'):
                     p_c += 1
 
-        db.session.commit()
+        db.session.flush()
 
+    db.session.commit()
     return {'success': True, 'generati': generati, 'saltati': saltati, 'giorni': giorni, 'doppi_turni': sum(doppi_count.values())}, None
 
 
@@ -908,8 +908,14 @@ def genera_turni():
         data_inizio = start.strftime('%Y-%m-%d')
     else:
         giorni = 1 if modalita == 'giorno' else 7
-    result, err = _genera_interno(data_inizio, giorni)
-    if err: return jsonify({'errore': err}), 400
+    try:
+        result, err = _genera_interno(data_inizio, giorni)
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'errore': f'Generazione interrotta: {type(e).__name__}: {str(e)}'}), 500
+    if err:
+        db.session.rollback()
+        return jsonify({'errore': err}), 400
     result['modalita'] = modalita
     return jsonify(result)
 
@@ -923,8 +929,14 @@ def genera_giorno():
         return jsonify({'errore': 'Non autorizzato'}), 403
     data = request.json or {}
     data_str = data.get('data', date.today().strftime('%Y-%m-%d'))
-    result, err = _genera_interno(data_str, 1)
-    if err: return jsonify({'errore': err}), 400
+    try:
+        result, err = _genera_interno(data_str, 1)
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'errore': f'Generazione interrotta: {type(e).__name__}: {str(e)}'}), 500
+    if err:
+        db.session.rollback()
+        return jsonify({'errore': err}), 400
     result['modalita'] = 'giorno'
     return jsonify(result)
 
