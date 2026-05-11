@@ -896,17 +896,15 @@ def _genera_interno(data_inizio_str, giorni):
             for dip in sorted([d for d in oss_notturni if d.id not in assenti_ids and not has_shift(d, data_str) and can_tipo(d, 'NOTTE', giorno)], key=lambda d: ore_mensili.get((d.id, mese_key), 0)):
                 crea(dip, 'NOTTE', giorno, forza=True)
                 break
-        while m_c < 4:
-            pool = sorted([d for d in all_oss if d.id not in assenti_ids and not has_shift(d, data_str) and can_tipo(d, 'MATTINO', giorno)], key=lambda d: ore_mensili.get((d.id, mese_key), 0))
-            if not pool:
+        for dip in sorted([d for d in all_oss if d.id not in assenti_ids and not has_shift(d, data_str) and can_tipo(d, 'MATTINO', giorno)], key=lambda d: ore_mensili.get((d.id, mese_key), 0)):
+            if m_c >= 4:
                 break
-            if crea(pool[0], 'MATTINO', giorno, forza=True):
+            if crea(dip, 'MATTINO', giorno, forza=True):
                 m_c += 1
-        while p_c < 3:
-            pool = sorted([d for d in all_oss if d.id not in assenti_ids and not has_shift(d, data_str) and can_tipo(d, 'POMERIGGIO', giorno)], key=lambda d: ore_mensili.get((d.id, mese_key), 0))
-            if not pool:
+        for dip in sorted([d for d in all_oss if d.id not in assenti_ids and not has_shift(d, data_str) and can_tipo(d, 'POMERIGGIO', giorno)], key=lambda d: ore_mensili.get((d.id, mese_key), 0)):
+            if p_c >= 3:
                 break
-            if crea(pool[0], 'POMERIGGIO', giorno, forza=True):
+            if crea(dip, 'POMERIGGIO', giorno, forza=True):
                 p_c += 1
 
         for dip in all_dip:
