@@ -842,28 +842,34 @@ def _genera_interno(data_inizio_str, giorni):
         p_c = len(ids_today(giorno, 'POMERIGGIO') & oss_ids)
         mese_key = giorno.strftime('%Y-%m')
         target_p = 3
-        if p_c < target_p:
+        doppi_oggi = len(ids_today(giorno, 'MATTINO') & ids_today(giorno, 'POMERIGGIO'))
+        MAX_DOPPI = 2
+        if p_c < target_p and doppi_oggi < MAX_DOPPI:
             for dip in sorted([d for d in all_oss if d.id in (ids_today(giorno, 'MATTINO') & oss_ids) and d.id not in ids_today(giorno, 'NOTTE')], key=lambda d: (chain_nsp_count.get(d.id, 0) if d.id in smonto_ieri else 0, ore_mensili.get((d.id, mese_key), 0), doppi_count.get(d.id, 0))):
-                if p_c >= target_p:
+                if p_c >= target_p or doppi_oggi >= MAX_DOPPI:
                     break
                 if can_tipo(dip, 'POMERIGGIO', giorno) and crea(dip, 'POMERIGGIO', giorno, allow_double=True, note='Auto (DOPPIO MAT+POM)'):
                     p_c += 1
+                    doppi_oggi += 1
             for dip in sorted([d for d in all_oss if d.id in (ids_today(giorno, 'MATTINO') & oss_ids) and d.id not in ids_today(giorno, 'NOTTE')], key=lambda d: (chain_nsp_count.get(d.id, 0) if d.id in smonto_ieri else 0, ore_mensili.get((d.id, mese_key), 0), doppi_count.get(d.id, 0))):
-                if p_c >= target_p:
+                if p_c >= target_p or doppi_oggi >= MAX_DOPPI:
                     break
                 if crea(dip, 'POMERIGGIO', giorno, allow_double=True, note='Auto (DOPPIO MAT+POM COPERTURA)'):
                     p_c += 1
-        if m_c < 4:
+                    doppi_oggi += 1
+        if m_c < 4 and doppi_oggi < MAX_DOPPI:
             for dip in sorted([d for d in all_oss if d.id in (ids_today(giorno, 'POMERIGGIO') & oss_ids) and d.id not in ids_today(giorno, 'NOTTE')], key=lambda d: (ore_mensili.get((d.id, mese_key), 0), doppi_count.get(d.id, 0))):
-                if m_c >= 4:
+                if m_c >= 4 or doppi_oggi >= MAX_DOPPI:
                     break
                 if can_tipo(dip, 'MATTINO', giorno) and crea(dip, 'MATTINO', giorno, allow_double=True, note='Auto (DOPPIO MAT+POM)'):
                     m_c += 1
+                    doppi_oggi += 1
             for dip in sorted([d for d in all_oss if d.id in (ids_today(giorno, 'POMERIGGIO') & oss_ids) and d.id not in ids_today(giorno, 'NOTTE')], key=lambda d: (ore_mensili.get((d.id, mese_key), 0), doppi_count.get(d.id, 0))):
-                if m_c >= 4:
+                if m_c >= 4 or doppi_oggi >= MAX_DOPPI:
                     break
                 if crea(dip, 'MATTINO', giorno, allow_double=True, note='Auto (DOPPIO MAT+POM COPERTURA)'):
                     m_c += 1
+                    doppi_oggi += 1
 
         m_c = len(ids_today(giorno, 'MATTINO') & oss_ids)
         p_c = len(ids_today(giorno, 'POMERIGGIO') & oss_ids)
