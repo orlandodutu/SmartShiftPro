@@ -16,6 +16,8 @@ CORS(app, supports_credentials=True, origins='*')
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 FRONTEND_DIST = os.path.abspath(os.path.join(BASE_DIR, '..', 'artifacts', 'gestione-turni-react', 'dist', 'public'))
 _raw_db_url = os.environ.get('DATABASE_URL', '')
+if os.environ.get('RENDER') and not _raw_db_url:
+    print("[startup] ATTENZIONE: DATABASE_URL non configurato. SQLite su Render può perdere i dati a ogni deploy/riavvio.")
 if _raw_db_url.startswith('postgres://'):
     _raw_db_url = _raw_db_url.replace('postgres://', 'postgresql://', 1)
 app.config['SQLALCHEMY_DATABASE_URI'] = (
@@ -187,34 +189,9 @@ def inizializza_staff():
         if Dipendente.query.filter_by(nome=nome).first() is None:
             db.session.add(Dipendente(nome=nome, ruolo=ruolo, is_admin=is_admin, password=''))
     db.session.commit()
-    orlando = Dipendente.query.filter_by(nome='Orlando').first()
-    if orlando:
-        duplicati_orlando = Dipendente.query.filter(
-            Dipendente.id != orlando.id,
-            db.func.lower(Dipendente.nome).in_(['orlando aus', 'orlando ausiliario', 'orlando aus.'])
-        ).all()
-        for dup in duplicati_orlando:
-            Turno.query.filter_by(dipendente_id=dup.id).update({'dipendente_id': orlando.id})
-            Assenza.query.filter_by(dipendente_id=dup.id).update({'dipendente_id': orlando.id})
-            db.session.delete(dup)
-        db.session.flush()
-    for nome, ruolo, is_admin in staff_base:
-        dip = Dipendente.query.filter_by(nome=nome).first()
-        if dip:
-            dip.ruolo = ruolo
-            dip.is_admin = is_admin
-            applica_preferenze_obbligatorie(dip)
     giustina = Dipendente.query.filter_by(nome='Giustina').first()
     if giustina:
-        giustina.ruolo = 'DEV'
         giustina.is_admin = True
-        applica_preferenze_obbligatorie(giustina)
-    if Dipendente.query.count() == len(staff_base) + 1:
-        for nome, ruolo, is_admin in staff_base:
-            dip = Dipendente.query.filter_by(nome=nome).first()
-            if dip:
-                dip.ruolo = ruolo
-                dip.is_admin = is_admin
     db.session.commit()
 
 
@@ -591,6 +568,13 @@ def _genera_interno(data_inizio_str, giorni):
         data_inizio = date.today()
 
     data_fine = data_inizio + timedelta(days=giorni - 1)
+    giorni_protetti = {
+        t.data for t in Turno.query.filter(
+            Turno.data >= data_inizio.strftime('%Y-%m-%d'),
+            Turno.data <= data_fine.strftime('%Y-%m-%d'),
+            Turno.manuale == True
+        ).all()
+    }
     turni_auto_esistenti = Turno.query.filter(
         Turno.data >= data_inizio.strftime('%Y-%m-%d'),
         Turno.data <= data_fine.strftime('%Y-%m-%d'),
@@ -598,6 +582,8 @@ def _genera_interno(data_inizio_str, giorni):
         db.or_(Turno.archivio_mese == '', Turno.archivio_mese.is_(None))
     ).all()
     for turno_old in turni_auto_esistenti:
+        if turno_old.data in giorni_protetti:
+            continue
         dip_old = turno_old.dipendente
         if dip_old and dip_old.ruolo != 'CAPOSALA':
             dip_old.ore_totali = max(0, (dip_old.ore_totali or 0) - (turno_old.ore or 0))
@@ -730,6 +716,9 @@ def _genera_interno(data_inizio_str, giorni):
     for i in range(giorni):
         giorno = data_inizio + timedelta(days=i)
         data_str = giorno.strftime('%Y-%m-%d')
+        if data_str in giorni_protetti:
+            saltati += 1
+            continue
         weekday = giorno.weekday()
         week_num = i // 7
         wk_start = giorno - timedelta(days=weekday)
@@ -1704,16 +1693,11 @@ def startup_init():
                 conn.execute(text("ALTER TABLE turno ADD COLUMN ora_inizio VARCHAR(5) DEFAULT ''"))
             if 'archivio_mese' not in turno_cols:
                 conn.execute(text("ALTER TABLE turno ADD COLUMN archivio_mese VARCHAR(7) DEFAULT ''"))
-            conn.execute(text("UPDATE dipendente SET ruolo='AUSILIARIO' WHERE ruolo='PULIZIE'"))
-            # ── Migrazione Giustina: rimuovi vecchi admin e dipendenti obsoleti ──
-            # Rimuovi is_admin da Caposala se esiste (non è più admin)
-            conn.execute(text("UPDATE dipendente SET is_admin=false WHERE LOWER(nome)='caposala'"))
-            # Crea Giustina se non esiste
             if is_pg:
                 conn.execute(text(
                     "INSERT INTO dipendente (nome, ruolo, is_admin, password, ore_totali, notti_fatte, ferie, malattia) "
                     "VALUES ('Giustina', 'DEV', true, '', 0, 0, 0, 0) "
-                    "ON CONFLICT (nome) DO UPDATE SET is_admin=true"
+                    "ON CONFLICT (nome) DO NOTHING"
                 ))
             else:
                 exists = conn.execute(text("SELECT COUNT(*) FROM dipendente WHERE nome='Giustina'")).scalar()
@@ -1722,8 +1706,6 @@ def startup_init():
                         "INSERT INTO dipendente (nome, ruolo, is_admin, password, ore_totali, notti_fatte, ferie, malattia) "
                         "VALUES ('Giustina', 'DEV', 1, '', 0, 0, 0, 0)"
                     ))
-                else:
-                    conn.execute(text("UPDATE dipendente SET is_admin=1 WHERE nome='Giustina'"))
             conn.commit()
     except Exception as e:
         print(f"[startup] Migration warning: {e}")
