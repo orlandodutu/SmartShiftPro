@@ -181,6 +181,17 @@ def inizializza_staff():
         if Dipendente.query.filter_by(nome=nome).first() is None:
             db.session.add(Dipendente(nome=nome, ruolo=ruolo, is_admin=is_admin, password=''))
     db.session.commit()
+    orlando = Dipendente.query.filter_by(nome='Orlando').first()
+    if orlando:
+        duplicati_orlando = Dipendente.query.filter(
+            Dipendente.id != orlando.id,
+            db.func.lower(Dipendente.nome).in_(['orlando aus', 'orlando ausiliario', 'orlando aus.'])
+        ).all()
+        for dup in duplicati_orlando:
+            Turno.query.filter_by(dipendente_id=dup.id).update({'dipendente_id': orlando.id})
+            Assenza.query.filter_by(dipendente_id=dup.id).update({'dipendente_id': orlando.id})
+            db.session.delete(dup)
+        db.session.flush()
     for nome, ruolo, is_admin in staff_base:
         dip = Dipendente.query.filter_by(nome=nome).first()
         if dip:
@@ -694,14 +705,16 @@ def _genera_interno(data_inizio_str, giorni):
 
         ieri = (giorno - timedelta(days=1)).strftime('%Y-%m-%d')
         avantieri = (giorno - timedelta(days=2)).strftime('%Y-%m-%d')
+        tre_giorni_fa = (giorno - timedelta(days=3)).strftime('%Y-%m-%d')
         notte_ieri = {t.dipendente_id for t in Turno.query.filter_by(data=ieri, tipo='NOTTE').all()}
         notte_due = {t.dipendente_id for t in Turno.query.filter_by(data=avantieri, tipo='NOTTE').all()}
+        notte_tre = {t.dipendente_id for t in Turno.query.filter_by(data=tre_giorni_fa, tipo='NOTTE').all()}
         smonto_ieri = {t.dipendente_id for t in Turno.query.filter_by(data=ieri, tipo='SMONTO').all()}
 
         for dip in all_oss:
             if dip.id in assenti_ids or has_shift(dip, data_str):
                 continue
-            if dip.id in smonto_ieri and dip.id in notte_due:
+            if dip.id in smonto_ieri and dip.id in notte_due and dip.id in notte_tre:
                 crea(dip, 'RIPOSO', giorno)
             elif dip.id in notte_ieri and dip.id in notte_due:
                 crea(dip, 'SMONTO', giorno)
@@ -731,6 +744,8 @@ def _genera_interno(data_inizio_str, giorni):
 
         for idx, dip in enumerate(all_oss):
             if dip.id in assenti_ids or dip.id == notte_riserva_id or has_shift(dip, data_str):
+                continue
+            if dip.id in smonto_ieri and not (dip.id in notte_due and dip.id in notte_tre):
                 continue
             rested_week = Turno.query.filter(Turno.dipendente_id == dip.id, Turno.data >= wk_start.strftime('%Y-%m-%d'), Turno.data <= wk_end.strftime('%Y-%m-%d'), Turno.tipo == 'RIPOSO').first() is not None
             rest_day = (idx + week_num) % 7
