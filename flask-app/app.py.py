@@ -818,17 +818,15 @@ def _genera_interno(data_inizio_str, giorni):
         def pool_for(tipo):
             return sorted([d for d in all_oss if d.id not in assenti_ids and d.id != notte_riserva_id and d.id not in blocked_post_night_ids and not has_shift(d, data_str) and can_tipo(d, tipo, giorno)], key=lambda d: score_tipo(d, tipo))
 
-        while m_c < 4:
-            pool = pool_for('MATTINO')
-            if not pool:
+        for dip in pool_for('MATTINO'):
+            if m_c >= 4:
                 break
-            if crea(pool[0], 'MATTINO', giorno):
+            if crea(dip, 'MATTINO', giorno):
                 m_c += 1
-        while p_c < 3:
-            pool = pool_for('POMERIGGIO')
-            if not pool:
+        for dip in pool_for('POMERIGGIO'):
+            if p_c >= 3:
                 break
-            if crea(pool[0], 'POMERIGGIO', giorno):
+            if crea(dip, 'POMERIGGIO', giorno):
                 p_c += 1
 
         if not ids_today(giorno, 'NOTTE') and oss_notturni:
