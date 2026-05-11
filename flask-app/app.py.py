@@ -478,12 +478,16 @@ def aggiungi_turno():
     if tipo == 'SMONTO' and not smonto_ha_notte_precedente(data['dipendente_id'], data['data']):
         return jsonify({'errore': 'SMONTO consentito solo dopo una NOTTE dello stesso dipendente'}), 400
     ore = ore_map.get(tipo, 8)
+    doppio_manual = Turno.query.filter_by(dipendente_id=data['dipendente_id'], data=data['data']).first() is not None
+    note = data.get('note', '')
+    if doppio_manual and 'DOPPIO' not in note:
+        note = f'{note} (DOPPIO MANUALE)'.strip()
     turno = Turno(
         dipendente_id=data['dipendente_id'],
         data=data['data'],
         tipo=tipo,
         ore=ore,
-        note=data.get('note', ''),
+        note=note,
         manuale=True,
     )
     db.session.add(turno)
@@ -780,7 +784,7 @@ def _genera_interno(data_inizio_str, giorni):
         def pool_for(tipo):
             return sorted([d for d in all_oss if d.id not in assenti_ids and d.id != notte_riserva_id and d.id not in blocked_post_night_ids and not has_shift(d, data_str) and can_tipo(d, tipo, giorno)], key=lambda d: score_tipo(d, tipo))
 
-        while m_c < 3:
+        while m_c < 4:
             pool = pool_for('MATTINO')
             if not pool:
                 break
@@ -802,25 +806,26 @@ def _genera_interno(data_inizio_str, giorni):
 
         m_c = len(ids_today(giorno, 'MATTINO') & oss_ids)
         p_c = len(ids_today(giorno, 'POMERIGGIO') & oss_ids)
-        if p_c < 3:
+        target_p = 4 if any(ore_corrente.get(d.id, 0) < 173 for d in all_oss) else 3
+        if p_c < target_p:
             for dip in sorted([d for d in all_oss if d.id in (ids_today(giorno, 'MATTINO') & oss_ids) and d.id not in ids_today(giorno, 'NOTTE')], key=lambda d: (chain_nsp_count.get(d.id, 0) if d.id in smonto_ieri else 0, doppi_count.get(d.id, 0))):
-                if p_c >= 3:
+                if p_c >= target_p:
                     break
                 if can_tipo(dip, 'POMERIGGIO', giorno) and crea(dip, 'POMERIGGIO', giorno, allow_double=True, note='Auto (DOPPIO MAT+POM)'):
                     p_c += 1
             for dip in sorted([d for d in all_oss if d.id in (ids_today(giorno, 'MATTINO') & oss_ids) and d.id not in ids_today(giorno, 'NOTTE')], key=lambda d: (chain_nsp_count.get(d.id, 0) if d.id in smonto_ieri else 0, doppi_count.get(d.id, 0))):
-                if p_c >= 3:
+                if p_c >= target_p:
                     break
                 if crea(dip, 'POMERIGGIO', giorno, allow_double=True, note='Auto (DOPPIO MAT+POM COPERTURA)'):
                     p_c += 1
-        if m_c < 3:
+        if m_c < 4:
             for dip in sorted([d for d in all_oss if d.id in (ids_today(giorno, 'POMERIGGIO') & oss_ids) and d.id not in ids_today(giorno, 'NOTTE')], key=lambda d: doppi_count.get(d.id, 0)):
-                if m_c >= 3:
+                if m_c >= 4:
                     break
                 if can_tipo(dip, 'MATTINO', giorno) and crea(dip, 'MATTINO', giorno, allow_double=True, note='Auto (DOPPIO MAT+POM)'):
                     m_c += 1
             for dip in sorted([d for d in all_oss if d.id in (ids_today(giorno, 'POMERIGGIO') & oss_ids) and d.id not in ids_today(giorno, 'NOTTE')], key=lambda d: doppi_count.get(d.id, 0)):
-                if m_c >= 3:
+                if m_c >= 4:
                     break
                 if crea(dip, 'MATTINO', giorno, allow_double=True, note='Auto (DOPPIO MAT+POM COPERTURA)'):
                     m_c += 1
@@ -828,15 +833,15 @@ def _genera_interno(data_inizio_str, giorni):
         m_c = len(ids_today(giorno, 'MATTINO') & oss_ids)
         p_c = len(ids_today(giorno, 'POMERIGGIO') & oss_ids)
         blocked_ids = ids_today(giorno, 'RIPOSO') | ids_today(giorno, 'SMONTO')
-        if m_c < 3:
+        if m_c < 4:
             for dip in sorted([d for d in all_oss if d.id not in assenti_ids and d.id not in blocked_ids and d.id not in ids_today(giorno, 'MATTINO')], key=lambda d: doppi_count.get(d.id, 0)):
-                if m_c >= 3:
+                if m_c >= 4:
                     break
                 if crea(dip, 'MATTINO', giorno, allow_double=True, note='Auto (DOPPIO MAT COPERTURA)'):
                     m_c += 1
-        if p_c < 3:
+        if p_c < target_p:
             for dip in sorted([d for d in all_oss if d.id not in assenti_ids and d.id not in blocked_ids and d.id not in ids_today(giorno, 'POMERIGGIO')], key=lambda d: (chain_nsp_count.get(d.id, 0) if d.id in smonto_ieri else 0, doppi_count.get(d.id, 0))):
-                if p_c >= 3:
+                if p_c >= target_p:
                     break
                 if crea(dip, 'POMERIGGIO', giorno, allow_double=True, note='Auto (DOPPIO POM COPERTURA)'):
                     p_c += 1

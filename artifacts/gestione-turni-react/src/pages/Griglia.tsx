@@ -16,13 +16,13 @@ import type { TipoTurno } from "@/lib/api";
 
 /* ── Cell styles ── */
 const CELL: Record<string, { label: string; cls: string }> = {
-  MATTINO:    { label: "MAT", cls: "bg-amber-500/20  text-amber-300  border-amber-500/30"   },
-  POMERIGGIO: { label: "POM", cls: "bg-orange-500/20 text-orange-300 border-orange-500/30"  },
-  NOTTE:      { label: "NOT", cls: "bg-indigo-500/20 text-indigo-300 border-indigo-500/35"  },
-  SMONTO:     { label: "SMO", cls: "bg-violet-500/20 text-violet-300 border-violet-500/30"  },
-  FERIE:      { label: "FER", cls: "bg-emerald-500/20 text-emerald-300 border-emerald-500/30" },
-  MALATTIA:   { label: "MAL", cls: "bg-red-500/20   text-red-300    border-red-500/30"       },
-  RIPOSO:     { label: "RIP", cls: "bg-slate-500/12 text-slate-500  border-slate-500/20"     },
+  MATTINO:    { label: "M", cls: "bg-amber-500/20  text-amber-300  border-amber-500/30"   },
+  POMERIGGIO: { label: "P", cls: "bg-orange-500/20 text-orange-300 border-orange-500/30"  },
+  NOTTE:      { label: "N", cls: "bg-indigo-500/20 text-indigo-300 border-indigo-500/35"  },
+  SMONTO:     { label: "S", cls: "bg-violet-500/20 text-violet-300 border-violet-500/30"  },
+  FERIE:      { label: "F", cls: "bg-emerald-500/20 text-emerald-300 border-emerald-500/30" },
+  MALATTIA:   { label: "ML", cls: "bg-red-500/20   text-red-300    border-red-500/30"       },
+  RIPOSO:     { label: "R", cls: "bg-slate-500/12 text-slate-500  border-slate-500/20"     },
 };
 const SHIFT_TYPES = ["MATTINO","POMERIGGIO","NOTTE","SMONTO","FERIE","MALATTIA","RIPOSO"] as const;
 
@@ -65,6 +65,7 @@ interface EditCellInfo {
   dipendente_nome: string;
   data: string;
   turno?: Turno;
+  turni?: Turno[];
 }
 
 function ShiftEditDialog({
@@ -104,6 +105,31 @@ function ShiftEditDialog({
       onSaved(saved);
     } catch {
       toast({ title: "Errore salvataggio", variant: "destructive" });
+    } finally {
+      setSaving(false);
+    }
+  }, [info, onSaved, toast]);
+
+  const handleAddDouble = useCallback(async (tipo: string) => {
+    setSaving(true);
+    try {
+      const res = await fetch("/flask-api/api/turni", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          dipendente_id: info.dipendente_id,
+          data: info.data,
+          tipo,
+          note: "DOPPIO MANUALE",
+        }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      const saved: Turno = await res.json();
+      toast({ title: "Doppio turno aggiunto", description: `${info.dipendente_nome} — ${tipo}` });
+      onSaved(saved);
+    } catch {
+      toast({ title: "Errore salvataggio doppio", variant: "destructive" });
     } finally {
       setSaving(false);
     }
@@ -156,6 +182,11 @@ function ShiftEditDialog({
               {info.turno.manuale && " (manuale)"}
             </div>
           )}
+          {info.turni && info.turni.length > 1 && (
+            <div className="text-[11px] text-amber-400/80">
+              Doppio turno presente: {info.turni.map((t) => CELL[t.tipo]?.label || t.tipo).join(" + ")}
+            </div>
+          )}
 
           <div className="grid grid-cols-2 gap-2">
             {SHIFT_TYPES.map((tipo) => {
@@ -178,6 +209,28 @@ function ShiftEditDialog({
               );
             })}
           </div>
+
+          {info.turno && (
+            <div className="space-y-2">
+              <div className="text-[10px] uppercase tracking-wide text-muted-foreground">Aggiungi doppio turno</div>
+              <div className="grid grid-cols-2 gap-2">
+                {(["MATTINO", "POMERIGGIO"] as const).map((tipo) => {
+                  const c = CELL[tipo];
+                  const exists = info.turni?.some((t) => t.tipo === tipo);
+                  return (
+                    <button
+                      key={`double-${tipo}`}
+                      disabled={saving || exists}
+                      onClick={() => handleAddDouble(tipo)}
+                      className={`px-3 py-2 rounded-xl border text-xs font-semibold transition-all disabled:opacity-40 ${c.cls}`}
+                    >
+                      + {c.label} doppio
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
           {info.turno && (
             <Button
@@ -264,12 +317,13 @@ export default function Griglia() {
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
-  /* ── Pivot: dipendente_id → data → Turno ── */
+  /* ── Pivot: dipendente_id → data → Turno[] ── */
   const pivot = useMemo(() => {
-    const map: Record<number, Record<string, Turno>> = {};
+    const map: Record<number, Record<string, Turno[]>> = {};
     turni.forEach((t) => {
       if (!map[t.dipendente_id]) map[t.dipendente_id] = {};
-      map[t.dipendente_id][t.data] = t;
+      if (!map[t.dipendente_id][t.data]) map[t.dipendente_id][t.data] = [];
+      map[t.dipendente_id][t.data].push(t);
     });
     return map;
   }, [turni]);
@@ -384,14 +438,17 @@ export default function Griglia() {
         sectionRow = `<tr><td colspan="${dates.length + 1}" style="background:#f1f5f9;padding:5px 10px;font-size:9px;font-weight:800;text-transform:uppercase;letter-spacing:0.12em;color:#64748b;border-top:2px solid #e2e8f0;">${roleLabel}</td></tr>`;
       }
       const cells = dates.map((d) => {
-        const t = pivot[dip.id]?.[d];
+        const turniCell = pivot[dip.id]?.[d] || [];
         const isToday = d === today;
         const { isSun, isSat } = fmtDay(d);
         const cellBg = isToday ? "background:#eff6ff;" : (isSun || isSat) ? "background:#fafafa;" : "";
-        if (!t) return `<td style="text-align:center;padding:4px 2px;${cellBg}border-right:1px solid #f1f5f9;color:#cbd5e1;font-size:10px;">·</td>`;
-        const s = SHIFT_STYLE[t.tipo] || { bg: "#f9fafb", border: "#e5e7eb", text: "#374151", label: t.tipo.slice(0, 3) };
+        if (!turniCell.length) return `<td style="text-align:center;padding:4px 2px;${cellBg}border-right:1px solid #f1f5f9;color:#cbd5e1;font-size:10px;">·</td>`;
+        const badges = turniCell.map((t) => {
+          const s = SHIFT_STYLE[t.tipo] || { bg: "#f9fafb", border: "#e5e7eb", text: "#374151", label: t.tipo.slice(0, 3) };
+          return `<span style="display:inline-block;margin:1px;padding:2px 5px;border-radius:4px;background:${s.bg};color:${s.text};font-size:9px;font-weight:800;border:1px solid ${s.border};letter-spacing:0.02em;">${s.label}${t.manuale ? "🔒" : ""}</span>`;
+        }).join("");
         return `<td style="text-align:center;padding:4px 2px;${cellBg}border-right:1px solid #f1f5f9;">
-          <span style="display:inline-block;padding:2px 5px;border-radius:4px;background:${s.bg};color:${s.text};font-size:9px;font-weight:800;border:1px solid ${s.border};letter-spacing:0.02em;">${s.label}${t.manuale ? "🔒" : ""}</span>
+          ${badges}
         </td>`;
       }).join("");
       const rowBg = "background:#ffffff;";
@@ -441,13 +498,13 @@ tbody tr:last-child td { border-bottom:none; }
 </table>
 <div class="legend">
   <span style="font-size:9px;color:#6b7280;font-weight:600;margin-right:4px;">Legenda:</span>
-  <span class="leg" style="background:#fff9e6;color:#92400e;border-color:#f59e0b;">MAT Mattino</span>
-  <span class="leg" style="background:#fff3e0;color:#7c2d12;border-color:#f97316;">POM Pomeriggio</span>
-  <span class="leg" style="background:#ede9fe;color:#3b0764;border-color:#7c3aed;">NOT Notte</span>
-  <span class="leg" style="background:#f5f3ff;color:#4c1d95;border-color:#a78bfa;">SMO Smonto</span>
+  <span class="leg" style="background:#fff9e6;color:#92400e;border-color:#f59e0b;">M Mattino</span>
+  <span class="leg" style="background:#fff3e0;color:#7c2d12;border-color:#f97316;">P Pomeriggio</span>
+  <span class="leg" style="background:#ede9fe;color:#3b0764;border-color:#7c3aed;">N Notte</span>
+  <span class="leg" style="background:#f5f3ff;color:#4c1d95;border-color:#a78bfa;">S Smonto</span>
   <span class="leg" style="background:#dcfce7;color:#14532d;border-color:#16a34a;">FER Ferie</span>
-  <span class="leg" style="background:#fee2e2;color:#7f1d1d;border-color:#dc2626;">MAL Malattia</span>
-  <span class="leg" style="background:#f1f5f9;color:#475569;border-color:#94a3b8;">RIP Riposo</span>
+  <span class="leg" style="background:#fee2e2;color:#7f1d1d;border-color:#dc2626;">ML Malattia</span>
+  <span class="leg" style="background:#f1f5f9;color:#475569;border-color:#94a3b8;">R Riposo</span>
   <span style="font-size:9px;color:#6b7280;margin-left:8px;">🔒 = turno manuale</span>
   <span class="today-badge" style="margin-left:6px;">Oggi evidenziato in blu</span>
 </div>
@@ -464,11 +521,13 @@ tbody tr:last-child td { border-bottom:none; }
   /* ── Cell click ── */
   const handleCellClick = useCallback((dip: Dipendente, data: string) => {
     if (!canEdit) return;
+    const turniCell = pivot[dip.id]?.[data] || [];
     setEditCell({
       dipendente_id: dip.id,
       dipendente_nome: dip.nome,
       data,
-      turno: pivot[dip.id]?.[data],
+      turno: turniCell[0],
+      turni: turniCell,
     });
   }, [canEdit, pivot]);
 
@@ -646,26 +705,32 @@ tbody tr:last-child td { border-bottom:none; }
                   </td>
 
                   {dates.map((d) => {
-                    const turno = pivot[dip.id]?.[d];
-                    const cell = turno ? CELL[turno.tipo] : null;
+                    const turniCell = pivot[dip.id]?.[d] || [];
                     const isToday = d === today;
                     const { isSun } = fmtDay(d);
                     return (
                       <td
                         key={d}
                         onClick={() => handleCellClick(dip, d)}
-                        title={turno ? `${turno.tipo} — ${turno.ore}h${turno.manuale ? " (manuale)" : ""}` : canEdit ? "Clicca per aggiungere turno" : "Nessun turno"}
+                        title={turniCell.length ? turniCell.map((t) => `${t.tipo} — ${t.ore}h${t.manuale ? " (manuale)" : ""}`).join(" + ") : canEdit ? "Clicca per aggiungere turno" : "Nessun turno"}
                         className={`text-center px-0.5 py-2 border-r border-white/4 last:border-r-0 transition-colors ${
                           isToday ? "bg-amber-500/5" : isSun ? "bg-white/[0.008]" : ""
                         } ${canEdit ? "cursor-pointer hover:bg-white/5" : ""}`}
                       >
-                        {cell ? (
-                          <span className={`inline-flex items-center justify-center text-[9px] font-bold px-1 py-0.5 rounded border leading-none ${cell.cls} ${
-                            turno?.manuale ? "ring-1 ring-amber-400/50" : ""
-                          }`}>
-                            {cell.label}
-                            {turno?.manuale && <Lock className="h-1.5 w-1.5 ml-0.5 opacity-70" />}
-                          </span>
+                        {turniCell.length ? (
+                          <div className="flex flex-wrap justify-center gap-0.5">
+                            {turniCell.map((turno) => {
+                              const cell = CELL[turno.tipo];
+                              return (
+                                <span key={turno.id} className={`inline-flex items-center justify-center text-[9px] font-bold px-1 py-0.5 rounded border leading-none ${cell.cls} ${
+                                  turno.manuale ? "ring-1 ring-amber-400/50" : ""
+                                }`}>
+                                  {cell.label}
+                                  {turno.manuale && <Lock className="h-1.5 w-1.5 ml-0.5 opacity-70" />}
+                                </span>
+                              );
+                            })}
+                          </div>
                         ) : (
                           <span className={`text-[9px] ${canEdit ? "text-muted-foreground/20 group-hover:text-amber-400/30" : "text-muted-foreground/15"}`}>
                             {canEdit ? "+" : "—"}
@@ -692,7 +757,7 @@ tbody tr:last-child td { border-bottom:none; }
             const dayTurni = turni.filter((t) => t.data === d);
             const dipWithTurno = sortedDip.map((dip) => ({
               dip,
-              turno: pivot[dip.id]?.[d],
+              turniCell: pivot[dip.id]?.[d] || [],
             }));
 
             return (
@@ -732,8 +797,8 @@ tbody tr:last-child td { border-bottom:none; }
                   {dipWithTurno.length === 0 ? (
                     <p className="text-[10px] text-muted-foreground/40 text-center py-3">Nessuno staff</p>
                   ) : (
-                    dipWithTurno.map(({ dip, turno }) => {
-                      const cell = turno ? CELL[turno.tipo] : null;
+                    dipWithTurno.map(({ dip, turniCell }) => {
+                      const cell = turniCell.length ? CELL[turniCell[0].tipo] : null;
                       return (
                         <div
                           key={dip.id}
@@ -746,13 +811,20 @@ tbody tr:last-child td { border-bottom:none; }
                           <span className="text-[10px] text-foreground/80 truncate font-medium leading-tight flex-1 min-w-0">
                             {dip.nome.split(" ")[0]}
                           </span>
-                          {cell ? (
-                            <span className={`inline-flex items-center text-[9px] font-bold px-1.5 py-0.5 rounded border leading-none shrink-0 ${cell.cls} ${
-                              turno?.manuale ? "ring-1 ring-amber-400/40" : ""
-                            }`}>
-                              {cell.label}
-                              {turno?.manuale && <Lock className="h-1.5 w-1.5 ml-0.5 opacity-60" />}
-                            </span>
+                          {turniCell.length ? (
+                            <div className="flex gap-0.5 shrink-0">
+                              {turniCell.map((turno) => {
+                                const c = CELL[turno.tipo];
+                                return (
+                                  <span key={turno.id} className={`inline-flex items-center text-[9px] font-bold px-1.5 py-0.5 rounded border leading-none ${c.cls} ${
+                                    turno.manuale ? "ring-1 ring-amber-400/40" : ""
+                                  }`}>
+                                    {c.label}
+                                    {turno.manuale && <Lock className="h-1.5 w-1.5 ml-0.5 opacity-60" />}
+                                  </span>
+                                );
+                              })}
+                            </div>
                           ) : canEdit ? (
                             <span className="text-[10px] text-white/15 font-bold">+</span>
                           ) : (
