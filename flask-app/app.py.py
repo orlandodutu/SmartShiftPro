@@ -107,7 +107,7 @@ class Turno(db.Model):
 
 
 SOLO_MATTINO_NOMI = {'Anna', 'Orlando', 'Fabiana', 'Angela', 'Marina'}
-NO_NOTTE_NOMI = set()
+NO_NOTTE_NOMI = {'Roberto', 'Vittoria', 'Stefania'}
 FORZA_NOTTE_NOMI = {'Stefania 2', 'Stefano'}
 
 def preferenze_obbligatorie(dip):
@@ -117,7 +117,7 @@ def preferenze_obbligatorie(dip):
         return {'MATTINO', 'POMERIGGIO', 'NOTTE'}
     prefs = (dip.preferenze_turno or '').split(',') if dip else []
     valide = {p for p in prefs if p in ('MATTINO', 'POMERIGGIO', 'NOTTE')}
-    if dip and dip.ruolo == 'OSS':
+    if dip and dip.ruolo == 'OSS' and dip.nome not in NO_NOTTE_NOMI:
         valide.add('NOTTE')
         return valide or {'MATTINO', 'POMERIGGIO', 'NOTTE'}
     if dip and dip.nome in NO_NOTTE_NOMI:
@@ -135,7 +135,7 @@ def applica_preferenze_obbligatorie(dip):
     prefs = preferenze_obbligatorie(dip)
     if dip and not dip.preferenze_turno:
         dip.preferenze_turno = ','.join(sorted(prefs))
-    elif dip and dip.ruolo == 'OSS' and 'NOTTE' not in (dip.preferenze_turno or '').split(','):
+    elif dip and dip.ruolo == 'OSS' and dip.nome not in NO_NOTTE_NOMI and 'NOTTE' not in (dip.preferenze_turno or '').split(','):
         dip.preferenze_turno = ','.join(sorted(prefs))
     return prefs
 
@@ -662,7 +662,7 @@ def _genera_interno(data_inizio_str, giorni):
     notti_periodo = {d.id: 0 for d in oss_notturni}
     chain_nsp_count = {d.id: 0 for d in all_oss}
     smonto_as_riposo = {}
-    MAX_NOTTI_MENSILI_OSS = 4
+    MAX_NOTTI_MENSILI_OSS = 6
 
     def _doppio_permesso(dip, nuovo_tipo, ds):
         turni_oggi = [t.tipo for t in Turno.query.filter_by(dipendente_id=dip.id, data=ds).all()]
