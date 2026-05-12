@@ -209,7 +209,10 @@ export default function Turni() {
     }
   };
 
-  const sorted = [...turni].sort((a, b) => {
+  const adminIds = new Set(dipendenti.filter((d) => d.is_admin).map((d) => d.id));
+  const turniVisibili = turni.filter((t) => !adminIds.has(t.dipendente_id) && t.ruolo !== "DEV");
+
+  const sorted = [...turniVisibili].sort((a, b) => {
     const dateCmp = a.data.localeCompare(b.data);
     if (dateCmp !== 0) return dateCmp;
     return (TIPO_ORDER[a.tipo] ?? 9) - (TIPO_ORDER[b.tipo] ?? 9);

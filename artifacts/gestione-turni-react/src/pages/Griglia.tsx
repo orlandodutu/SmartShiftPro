@@ -334,9 +334,8 @@ export default function Griglia() {
   const sortedDip = useMemo(
     () =>
       [...dipendenti]
-        .filter((d) => d.ruolo !== "CAPOSALA")
+        .filter((d) => !d.is_admin && d.ruolo !== "CAPOSALA")
         .sort((a, b) => {
-          if (a.is_admin !== b.is_admin) return a.is_admin ? -1 : 1;
           return (ROLE_ORDER[a.ruolo] ?? 9) - (ROLE_ORDER[b.ruolo] ?? 9) || a.nome.localeCompare(b.nome);
         }),
     [dipendenti]

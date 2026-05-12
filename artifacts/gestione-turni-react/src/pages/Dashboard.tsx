@@ -55,6 +55,7 @@ export default function Dashboard() {
   const [dipendenti, setDipendenti] = useState<Dipendente[]>([]);
   const [tutteAssenze, setTutteAssenze] = useState<Assenza[]>([]);
   const [turniOggi, setTurniOggi] = useState<Turno[]>([]);
+  const [meseTurni, setMeseTurni] = useState<Turno[]>([]);
 
   /* Add user */
   const [addUserOpen, setAddUserOpen] = useState(false);
@@ -201,6 +202,7 @@ export default function Dashboard() {
       if (dipRes.ok) setDipendenti(await dipRes.json());
       if (turniRes.ok) {
         const all: Turno[] = await turniRes.json();
+        setMeseTurni(all);
         setTurniOggi(all.filter((t) => t.data === today));
       }
       await fetchAllAssenze();
@@ -339,16 +341,16 @@ export default function Dashboard() {
   const getAbsenceToday = (dipId: number) =>
     tutteAssenze.find((a) => a.dipendente_id === dipId && isActiveToday(a, today));
 
-  /* Overview stats for Giustina */
-  const staffSenzaAdmin = stats.filter((d) => !d.is_admin && d.ruolo !== "CAPOSALA");
+  /* Overview stats per mese corrente */
+  const staffIds = new Set(stats.filter((d) => !d.is_admin && d.ruolo !== "CAPOSALA").map((d) => d.id));
   const assentiOggi = tutteAssenze.filter((a) => isActiveToday(a, today));
   const inServizioOggi = turniOggi.filter((t) => !["RIPOSO", "FERIE", "MALATTIA", "SMONTO"].includes(t.tipo)).length;
-  const totalOre = staffSenzaAdmin.reduce((s, d) => s + (d.ore_totali ?? 0), 0);
-  const totalNotti = staffSenzaAdmin.reduce((s, d) => s + (d.notti_fatte ?? 0), 0);
+  const oreMese = meseTurni.filter((t) => staffIds.has(t.dipendente_id)).reduce((s, t) => s + (t.ore ?? 0), 0);
+  const nottiMese = meseTurni.filter((t) => staffIds.has(t.dipendente_id) && t.tipo === "NOTTE").length;
 
   const statCards = [
-    { label: "Ore totali staff", value: totalOre,      icon: Clock,       color: "text-gold",        bg: "bg-amber-500/10"   },
-    { label: "Notti totali",     value: totalNotti,     icon: Moon,        color: "text-slate-300",   bg: "bg-slate-500/10"   },
+    { label: `Ore mese (${mese}/${anno})`, value: oreMese,      icon: Clock,       color: "text-gold",        bg: "bg-amber-500/10"   },
+    { label: `Notti mese (${mese}/${anno})`, value: nottiMese,  icon: Moon,        color: "text-slate-300",   bg: "bg-slate-500/10"   },
     { label: "In servizio oggi", value: inServizioOggi, icon: Activity,    color: "text-emerald-400", bg: "bg-emerald-500/10" },
     { label: "Assenti oggi",     value: assentiOggi.length, icon: CalendarOff, color: "text-red-400", bg: "bg-red-500/10"  },
   ];
