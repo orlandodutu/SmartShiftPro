@@ -849,7 +849,7 @@ def _genera_interno(data_inizio_str, giorni):
             return sorted([d for d in all_oss if d.id not in assenti_ids and d.id not in blocked_post_night_ids and not needs_rest.get(d.id, False) and not has_shift(d, data_str) and can_tipo(d, tipo, giorno)], key=lambda d: score_tipo(d, tipo))
 
         for dip in pool_for('MATTINO'):
-            if m_c >= 4:
+            if m_c >= 3:
                 break
             if crea(dip, 'MATTINO', giorno):
                 m_c += 1
@@ -879,15 +879,15 @@ def _genera_interno(data_inizio_str, giorni):
                 if crea(dip, 'POMERIGGIO', giorno, allow_double=True, note='Auto (DOPPIO MAT+POM COPERTURA)'):
                     p_c += 1
                     doppi_oggi += 1
-        if m_c < 4 and doppi_oggi < MAX_DOPPI:
+        if m_c < 3 and doppi_oggi < MAX_DOPPI:
             for dip in sorted([d for d in all_oss if d.id in (ids_today(giorno, 'POMERIGGIO') & oss_ids) and d.id not in ids_today(giorno, 'NOTTE') and not needs_rest.get(d.id, False) and ore_mensili.get((d.id, mese_key), 0) <= soft_cap_doppi], key=lambda d: (ore_mensili.get((d.id, mese_key), 0), doppi_count.get(d.id, 0))):
-                if m_c >= 4 or doppi_oggi >= MAX_DOPPI:
+                if m_c >= 3 or doppi_oggi >= MAX_DOPPI:
                     break
                 if can_tipo(dip, 'MATTINO', giorno) and crea(dip, 'MATTINO', giorno, allow_double=True, note='Auto (DOPPIO MAT+POM)'):
                     m_c += 1
                     doppi_oggi += 1
             for dip in sorted([d for d in all_oss if d.id in (ids_today(giorno, 'POMERIGGIO') & oss_ids) and d.id not in ids_today(giorno, 'NOTTE') and not needs_rest.get(d.id, False) and ore_mensili.get((d.id, mese_key), 0) <= soft_cap_doppi], key=lambda d: (ore_mensili.get((d.id, mese_key), 0), doppi_count.get(d.id, 0))):
-                if m_c >= 4 or doppi_oggi >= MAX_DOPPI:
+                if m_c >= 3 or doppi_oggi >= MAX_DOPPI:
                     break
                 if crea(dip, 'MATTINO', giorno, allow_double=True, note='Auto (DOPPIO MAT+POM COPERTURA)'):
                     m_c += 1
@@ -897,9 +897,9 @@ def _genera_interno(data_inizio_str, giorni):
         p_c = len(ids_today(giorno, 'POMERIGGIO') & oss_ids)
         blocked_ids = ids_today(giorno, 'RIPOSO') | ids_today(giorno, 'SMONTO')
         notte_ids_oggi = ids_today(giorno, 'NOTTE')
-        if m_c < 4:
+        if m_c < 3:
             for dip in sorted([d for d in all_oss if d.id not in assenti_ids and d.id not in blocked_ids and d.id not in notte_ids_oggi and not needs_rest.get(d.id, False) and d.id not in ids_today(giorno, 'MATTINO')], key=lambda d: (ore_mensili.get((d.id, mese_key), 0), doppi_count.get(d.id, 0))):
-                if m_c >= 4:
+                if m_c >= 3:
                     break
                 if crea(dip, 'MATTINO', giorno, allow_double=True, note='Auto (DOPPIO MAT COPERTURA)'):
                     m_c += 1
@@ -929,8 +929,8 @@ def _genera_interno(data_inizio_str, giorni):
         m_c = len(ids_today(giorno, 'MATTINO') & oss_ids)
         p_c = len(ids_today(giorno, 'POMERIGGIO') & oss_ids)
         n_c = len(ids_today(giorno, 'NOTTE') & oss_ids)
-        if m_c < 4:
-            warnings.append(f"{data_str}: solo {m_c} MATTINO (target 4) — limite ore mensili")
+        if m_c < 3:
+            warnings.append(f"{data_str}: solo {m_c} MATTINO (target 3) — limite ore mensili")
         if p_c < 3:
             warnings.append(f"{data_str}: solo {p_c} POMERIGGIO (target 3) — limite ore mensili")
         if n_c < 1:
