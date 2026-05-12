@@ -822,13 +822,21 @@ def _genera_interno(data_inizio_str, giorni):
             mese_key = giorno.strftime('%Y-%m')
             def _notti_mese(dip_id, mk):
                 return Turno.query.filter(Turno.dipendente_id==dip_id, Turno.data.like(f'{mk}-%'), Turno.tipo=='NOTTE').count()
-            night_pool = sorted([d for d in oss_notturni if d.id not in assenti_ids and not has_shift(d, data_str) and _notti_mese(d.id, mese_key) < MAX_NOTTI_MENSILI_OSS], key=lambda d: (needs_rest.get(d.id, False), d.id != notte_riserva_id, _notti_mese(d.id, mese_key), d.notti_fatte or 0, ore_mensili.get((d.id, mese_key), 0), ore_corrente.get(d.id, 0)))
+            def _barbara_cooldown(dip, g):
+                if dip.nome != 'Barbara':
+                    return True
+                for back in range(1, 3):
+                    ds = (g - timedelta(days=back)).strftime('%Y-%m-%d')
+                    if Turno.query.filter_by(dipendente_id=dip.id, data=ds, tipo='NOTTE').first():
+                        return False
+                return True
+            night_pool = sorted([d for d in oss_notturni if d.id not in assenti_ids and not has_shift(d, data_str) and _notti_mese(d.id, mese_key) < MAX_NOTTI_MENSILI_OSS and _barbara_cooldown(d, giorno)], key=lambda d: (needs_rest.get(d.id, False), d.id != notte_riserva_id, _notti_mese(d.id, mese_key), d.notti_fatte or 0, ore_mensili.get((d.id, mese_key), 0), ore_corrente.get(d.id, 0)))
             for dip in night_pool:
                 if crea(dip, 'NOTTE', giorno):
                     break
             # Fallback: se nessuno libero, prova doppio notte con chi ha gia M o P
             if not ids_today(giorno, 'NOTTE'):
-                night_pool_double = sorted([d for d in oss_notturni if d.id not in assenti_ids and has_shift(d, data_str) and _doppio_permesso(d, 'NOTTE', data_str) and _notti_mese(d.id, mese_key) < MAX_NOTTI_MENSILI_OSS], key=lambda d: (_notti_mese(d.id, mese_key), d.notti_fatte or 0, ore_mensili.get((d.id, mese_key), 0), ore_corrente.get(d.id, 0)))
+                night_pool_double = sorted([d for d in oss_notturni if d.id not in assenti_ids and has_shift(d, data_str) and _doppio_permesso(d, 'NOTTE', data_str) and _notti_mese(d.id, mese_key) < MAX_NOTTI_MENSILI_OSS and _barbara_cooldown(d, giorno)], key=lambda d: (_notti_mese(d.id, mese_key), d.notti_fatte or 0, ore_mensili.get((d.id, mese_key), 0), ore_corrente.get(d.id, 0)))
                 for dip in night_pool_double:
                     if crea(dip, 'NOTTE', giorno, allow_double=True, note='Auto (DOPPIO NOTTE)'):
                         break
