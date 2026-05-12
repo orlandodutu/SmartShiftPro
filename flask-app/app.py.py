@@ -111,10 +111,10 @@ NO_NOTTE_NOMI = {'Roberto', 'Vittoria', 'Stefania'}
 FORZA_NOTTE_NOMI = {'Stefania 2', 'Stefano'}
 
 def preferenze_obbligatorie(dip):
-    if dip and (dip.nome in SOLO_MATTINO_NOMI or dip.ruolo in ('AUSILIARIO', 'INFERMIERA')):
-        return {'MATTINO'}
     if dip and dip.nome in FORZA_NOTTE_NOMI:
         return {'MATTINO', 'POMERIGGIO', 'NOTTE'}
+    if dip and (dip.nome in SOLO_MATTINO_NOMI or dip.ruolo in ('AUSILIARIO', 'INFERMIERA')):
+        return {'MATTINO'}
     prefs = (dip.preferenze_turno or '').split(',') if dip else []
     valide = {p for p in prefs if p in ('MATTINO', 'POMERIGGIO', 'NOTTE')}
     if dip and dip.ruolo == 'OSS' and dip.nome not in NO_NOTTE_NOMI:
@@ -126,12 +126,12 @@ def preferenze_obbligatorie(dip):
     return valide or {'MATTINO', 'POMERIGGIO', 'NOTTE'}
 
 def applica_preferenze_obbligatorie(dip):
-    if dip and (dip.nome in SOLO_MATTINO_NOMI or dip.ruolo in ('AUSILIARIO', 'INFERMIERA')):
-        dip.preferenze_turno = 'MATTINO'
-        return {'MATTINO'}
     if dip and dip.nome in FORZA_NOTTE_NOMI:
         dip.preferenze_turno = 'MATTINO,POMERIGGIO,NOTTE'
         return {'MATTINO', 'POMERIGGIO', 'NOTTE'}
+    if dip and (dip.nome in SOLO_MATTINO_NOMI or dip.ruolo in ('AUSILIARIO', 'INFERMIERA')):
+        dip.preferenze_turno = 'MATTINO'
+        return {'MATTINO'}
     prefs = preferenze_obbligatorie(dip)
     if dip and not dip.preferenze_turno:
         dip.preferenze_turno = ','.join(sorted(prefs))
