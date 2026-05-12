@@ -107,7 +107,7 @@ class Turno(db.Model):
 
 
 SOLO_MATTINO_NOMI = {'Anna', 'Orlando', 'Fabiana', 'Angela', 'Marina'}
-NO_NOTTE_NOMI = {'Roberto', 'Vittoria', 'Stefania'}
+NO_NOTTE_NOMI = set()
 FORZA_NOTTE_NOMI = {'Stefania 2', 'Stefano'}
 
 def preferenze_obbligatorie(dip):
@@ -117,6 +117,9 @@ def preferenze_obbligatorie(dip):
         return {'MATTINO', 'POMERIGGIO', 'NOTTE'}
     prefs = (dip.preferenze_turno or '').split(',') if dip else []
     valide = {p for p in prefs if p in ('MATTINO', 'POMERIGGIO', 'NOTTE')}
+    if dip and dip.ruolo == 'OSS':
+        valide.add('NOTTE')
+        return valide or {'MATTINO', 'POMERIGGIO', 'NOTTE'}
     if dip and dip.nome in NO_NOTTE_NOMI:
         valide.discard('NOTTE')
         return valide or {'MATTINO', 'POMERIGGIO'}
@@ -132,7 +135,7 @@ def applica_preferenze_obbligatorie(dip):
     prefs = preferenze_obbligatorie(dip)
     if dip and not dip.preferenze_turno:
         dip.preferenze_turno = ','.join(sorted(prefs))
-    elif dip and dip.nome in NO_NOTTE_NOMI and 'NOTTE' in (dip.preferenze_turno or '').split(','):
+    elif dip and dip.ruolo == 'OSS' and 'NOTTE' not in (dip.preferenze_turno or '').split(','):
         dip.preferenze_turno = ','.join(sorted(prefs))
     return prefs
 
@@ -659,6 +662,24 @@ def _genera_interno(data_inizio_str, giorni):
     notti_periodo = {d.id: 0 for d in oss_notturni}
     chain_nsp_count = {d.id: 0 for d in all_oss}
     smonto_as_riposo = {}
+    MAX_NOTTI_MENSILI_OSS = 4
+
+    def _doppio_permesso(dip, nuovo_tipo, ds):
+        turni_oggi = [t.tipo for t in Turno.query.filter_by(dipendente_id=dip.id, data=ds).all()]
+        if nuovo_tipo in turni_oggi:
+            return False
+        if not turni_oggi:
+            return True
+        combinati = set(turni_oggi + [nuovo_tipo])
+        if dip.nome == 'Barbara' and 'NOTTE' in combinati:
+            return False
+        if dip.nome == 'Ioana':
+            return combinati == {'POMERIGGIO', 'NOTTE'}
+        if dip.nome == 'Elena':
+            return combinati in [{'MATTINO', 'NOTTE'}, {'MATTINO', 'POMERIGGIO'}]
+        if dip.nome == 'Carmen':
+            return combinati in [{'POMERIGGIO', 'NOTTE'}, {'MATTINO', 'POMERIGGIO'}]
+        return True
 
     def has_shift(dip, data_str, tipo=None):
         q = Turno.query.filter_by(dipendente_id=dip.id, data=data_str)
@@ -698,6 +719,9 @@ def _genera_interno(data_inizio_str, giorni):
             saltati += 1
             return False
         if tipo == 'SMONTO' and not smonto_ha_notte_precedente(dip.id, data_str):
+            saltati += 1
+            return False
+        if allow_double and has_shift(dip, data_str) and not _doppio_permesso(dip, tipo, data_str):
             saltati += 1
             return False
         ore = ore_override if ore_override is not None else ORE_MAP.get(tipo, 0)
@@ -796,10 +820,18 @@ def _genera_interno(data_inizio_str, giorni):
         # Assegna NOTTE prima del riposo settimanale per garantire copertura
         if not ids_today(giorno, 'NOTTE') and oss_notturni:
             mese_key = giorno.strftime('%Y-%m')
-            night_pool = sorted([d for d in oss_notturni if d.id not in assenti_ids and not has_shift(d, data_str)], key=lambda d: (needs_rest.get(d.id, False), d.id != notte_riserva_id, notti_periodo.get(d.id, 0), d.notti_fatte or 0, ore_mensili.get((d.id, mese_key), 0), ore_corrente.get(d.id, 0)))
+            def _notti_mese(dip_id, mk):
+                return Turno.query.filter(Turno.dipendente_id==dip_id, Turno.data.like(f'{mk}-%'), Turno.tipo=='NOTTE').count()
+            night_pool = sorted([d for d in oss_notturni if d.id not in assenti_ids and not has_shift(d, data_str) and _notti_mese(d.id, mese_key) < MAX_NOTTI_MENSILI_OSS], key=lambda d: (needs_rest.get(d.id, False), d.id != notte_riserva_id, _notti_mese(d.id, mese_key), d.notti_fatte or 0, ore_mensili.get((d.id, mese_key), 0), ore_corrente.get(d.id, 0)))
             for dip in night_pool:
                 if crea(dip, 'NOTTE', giorno):
                     break
+            # Fallback: se nessuno libero, prova doppio notte con chi ha gia M o P
+            if not ids_today(giorno, 'NOTTE'):
+                night_pool_double = sorted([d for d in oss_notturni if d.id not in assenti_ids and has_shift(d, data_str) and _doppio_permesso(d, 'NOTTE', data_str) and _notti_mese(d.id, mese_key) < MAX_NOTTI_MENSILI_OSS], key=lambda d: (_notti_mese(d.id, mese_key), d.notti_fatte or 0, ore_mensili.get((d.id, mese_key), 0), ore_corrente.get(d.id, 0)))
+                for dip in night_pool_double:
+                    if crea(dip, 'NOTTE', giorno, allow_double=True, note='Auto (DOPPIO NOTTE)'):
+                        break
 
         if orlando and orlando.id not in assenti_ids and not has_shift(orlando, data_str):
             crea(orlando, 'RIPOSO' if weekday == 6 else 'MATTINO', giorno, 0 if weekday == 6 else 7, '07:00')
@@ -834,6 +866,11 @@ def _genera_interno(data_inizio_str, giorni):
         p_c = len(ids_today(giorno, 'POMERIGGIO') & oss_ids)
 
         blocked_post_night_ids = ids_today(giorno, 'SMONTO') | ids_today(giorno, 'RIPOSO')
+        # Blocca M/P per chi ha NOTTE e non può fare doppi con notte
+        for nid in ids_today(giorno, 'NOTTE'):
+            dip_n = db.session.get(Dipendente, nid)
+            if dip_n and not _doppio_permesso(dip_n, 'MATTINO', data_str):
+                blocked_post_night_ids.add(nid)
 
         def score_tipo(dip, tipo):
             mese_key = giorno.strftime('%Y-%m')
