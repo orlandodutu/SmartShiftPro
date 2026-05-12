@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import { Dipendente, Turno, Assenza } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -56,6 +56,8 @@ export default function Dashboard() {
   const [tutteAssenze, setTutteAssenze] = useState<Assenza[]>([]);
   const [turniOggi, setTurniOggi] = useState<Turno[]>([]);
   const [meseTurni, setMeseTurni] = useState<Turno[]>([]);
+  const [dashMese, setDashMese] = useState(new Date().getMonth() + 1);
+  const [dashAnno, setDashAnno] = useState(new Date().getFullYear());
 
   /* Add user */
   const [addUserOpen, setAddUserOpen] = useState(false);
@@ -202,7 +204,6 @@ export default function Dashboard() {
       if (dipRes.ok) setDipendenti(await dipRes.json());
       if (turniRes.ok) {
         const all: Turno[] = await turniRes.json();
-        setMeseTurni(all);
         setTurniOggi(all.filter((t) => t.data === today));
       }
       await fetchAllAssenze();
@@ -211,11 +212,28 @@ export default function Dashboard() {
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
+  useEffect(() => {
+    if (!user) return;
+    fetch(`/flask-api/api/turni?mese=${dashMese}&anno=${dashAnno}`, { credentials: "include" })
+      .then((r) => r.ok ? r.json() : [])
+      .then((all: Turno[]) => setMeseTurni(all));
+  }, [user, dashMese, dashAnno]);
+
+  const staffStatsMese = useMemo(() => {
+    const map: Record<number, { ore: number; notti: number }> = {};
+    meseTurni.forEach((t) => {
+      if (!map[t.dipendente_id]) map[t.dipendente_id] = { ore: 0, notti: 0 };
+      map[t.dipendente_id].ore += t.ore ?? 0;
+      if (t.tipo === "NOTTE") map[t.dipendente_id].notti += 1;
+    });
+    return map;
+  }, [meseTurni]);
+
   /* Staff profile open */
   const openProfile = (dip: Dipendente) => {
     if (dip.is_admin) return;
     setProfileTarget(dip);
-    setProfileTab("preferenze");
+    setProfileTab((prev) => prev === "turni" ? "turni" : "preferenze");
     setPrefSelected((dip.preferenze_turno ?? ["MATTINO", "POMERIGGIO", "NOTTE"]) as Pref[]);
     setAssenze([]);
     setNewAssenza({ tipo: "MALATTIA", data_inizio: today, data_fine: today, note: "" });
@@ -240,7 +258,7 @@ export default function Dashboard() {
   useEffect(() => {
     if (!profileTarget || profileTab !== "turni") return;
     setStaffTurniLoading(true);
-    fetch(`/flask-api/api/turni?dipendente_id=${profileTarget.id}&mese=${staffTurniMese}&anno=${staffTurniAnno}`, { credentials: "include" })
+    fetch(`/flask-api/api/turni?dipendente_id=${profileTarget.id}&mese=${staffTurniMese}&anno=${staffTurniAnno}&archivio=true`, { credentials: "include" })
       .then((r) => r.ok ? r.json() : [])
       .then((data: Turno[]) => setStaffTurni(data.sort((a, b) => a.data.localeCompare(b.data))))
       .finally(() => setStaffTurniLoading(false));
@@ -473,11 +491,29 @@ export default function Dashboard() {
             <Card className="glass border-white/8 shadow-none">
               <CardHeader className="pb-3">
                 <CardTitle className="text-sm font-semibold text-muted-foreground uppercase tracking-wide flex items-center justify-between">
-                  <span className="flex items-center gap-2"><Users className="h-4 w-4" />Staff — Ore Cumulative</span>
+                  <span className="flex items-center gap-2"><Users className="h-4 w-4" />Staff — Ore Mese {dashMese}/{dashAnno}</span>
                   <span className="text-[10px] font-normal text-muted-foreground/50 normal-case">Clicca per gestire</span>
                 </CardTitle>
               </CardHeader>
               <CardContent className="p-0">
+                <div className="px-5 py-2 flex items-center gap-2 border-b border-white/5">
+                  <select
+                    value={dashMese}
+                    onChange={(e) => setDashMese(Number(e.target.value))}
+                    className="flex-1 bg-white/5 border border-white/10 rounded-lg px-2 h-8 text-xs text-foreground"
+                  >
+                    {["Gen","Feb","Mar","Apr","Mag","Giu","Lug","Ago","Set","Ott","Nov","Dic"].map((m, idx) => (
+                      <option key={idx + 1} value={idx + 1}>{m}</option>
+                    ))}
+                  </select>
+                  <select
+                    value={dashAnno}
+                    onChange={(e) => setDashAnno(Number(e.target.value))}
+                    className="w-20 bg-white/5 border border-white/10 rounded-lg px-2 h-8 text-xs text-foreground"
+                  >
+                    {[anno - 1, anno, anno + 1].map((y) => <option key={y} value={y}>{y}</option>)}
+                  </select>
+                </div>
                 {lastAddedDip && (
                   <div className="mx-4 mt-3 mb-1 flex items-center gap-3 rounded-xl border border-amber-500/30 bg-amber-500/8 px-4 py-2.5">
                     <Zap className="h-4 w-4 text-amber-400 shrink-0 animate-pulse" />
@@ -509,7 +545,8 @@ export default function Dashboard() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {stats.filter((d) => !d.is_admin && d.ruolo !== "CAPOSALA").sort((a, b) => b.ore_totali - a.ore_totali).map((dip) => {
+                    {stats.filter((d) => !d.is_admin && d.ruolo !== "CAPOSALA").sort((a, b) => (staffStatsMese[b.id]?.ore ?? 0) - (staffStatsMese[a.id]?.ore ?? 0)).map((dip) => {
+                      const statsMese = staffStatsMese[dip.id] ?? { ore: 0, notti: 0 };
                       const absence = getAbsenceToday(dip.id);
                       const turnoOggi = turniOggi.find((t) => t.dipendente_id === dip.id);
                       return (
@@ -542,8 +579,8 @@ export default function Dashboard() {
                               <span className="text-[9px] font-semibold text-muted-foreground/40 border border-white/8 px-1.5 py-0.5 rounded">—</span>
                             )}
                           </TableCell>
-                          <TableCell className="text-right font-mono text-sm text-gold font-bold">{dip.ore_totali}</TableCell>
-                          <TableCell className="text-right pr-4 font-mono text-xs text-slate-400">{dip.notti_fatte}</TableCell>
+                          <TableCell className="text-right font-mono text-sm text-gold font-bold">{statsMese.ore}</TableCell>
+                          <TableCell className="text-right pr-4 font-mono text-xs text-slate-400">{statsMese.notti}</TableCell>
                           <TableCell className="pr-3 w-20">
                             <div className="flex items-center gap-1 justify-end">
                               {(lastAddedDip?.id === dip.id || !turnoOggi) && user?.is_admin && (
