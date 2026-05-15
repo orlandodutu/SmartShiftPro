@@ -1,0 +1,8 @@
+#!/bin/bash
+set -e
+curl -fsSL https://github.com/pnpm/pnpm/releases/download/v9.15.0/pnpm-linux-x64 -o /tmp/pnpm
+chmod +x /tmp/pnpm
+pip install -r flask-app/requirements.txt
+/tmp/pnpm install --ignore-scripts
+cd artifacts/gestione-turni-react
+PORT=5173 BASE_PATH=/ /tmp/pnpm exec vite build --config vite.config.ts
