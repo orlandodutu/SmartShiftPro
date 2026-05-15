@@ -3,7 +3,7 @@ services:
     name: smartshift-pro
     runtime: python
     plan: free
-    buildCommand: pip install -r flask-app/requirements.txt && curl -fsSL https://github.com/pnpm/pnpm/releases/download/v9.15.0/pnpm-linux-x64 -o /tmp/pnpm && chmod +x /tmp/pnpm && /tmp/pnpm install --ignore-scripts && cd artifacts/gestione-turni-react && PORT=5173 BASE_PATH=/ /tmp/pnpm exec vite build --config vite.config.ts
+    buildCommand: chmod +x build.sh && ./build.sh
     startCommand: gunicorn --chdir flask-app wsgi:app
     envVars:
       - key: SESSION_SECRET
