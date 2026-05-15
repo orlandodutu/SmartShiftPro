@@ -20,8 +20,8 @@ run([
 ])
 run(["chmod", "+x", "/tmp/pnpm"])
 
-# 2. Install Python dependencies
-req_path = os.path.join(REPO_ROOT, "flask-app", "requirements.txt")
+# 2. Install Python dependencies (requirements.txt is in repo root, not flask-app/)
+req_path = os.path.join(REPO_ROOT, "requirements.txt")
 run([sys.executable, "-m", "pip", "install", "-r", req_path])
 
 # 3. Install JS dependencies with pnpm (ignore scripts for safety)
