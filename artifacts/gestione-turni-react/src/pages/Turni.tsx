@@ -148,6 +148,13 @@ export default function Turni() {
     init();
   }, []);
 
+  useEffect(() => {
+    if (!isAddOpen) return;
+    fetch("/flask-api/api/dipendenti", { credentials: "include" })
+      .then((r) => (r.ok ? r.json() : []))
+      .then(setDipendenti);
+  }, [isAddOpen]);
+
   const handleDelete = async (id: number) => {
     if (!confirm("Eliminare questo turno?\n\nSe è una NOTTE, lo smonto del giorno dopo sarà rimosso automaticamente.")) return;
     const res = await fetch(`/flask-api/api/turni/${id}`, { method: "DELETE", credentials: "include" });

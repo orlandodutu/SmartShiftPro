@@ -320,6 +320,12 @@ export default function Griglia() {
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
+  useEffect(() => {
+    const onFocus = () => fetchData();
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, [fetchData]);
+
   /* ── Pivot: dipendente_id → data → Turno[] ── */
   const pivot = useMemo(() => {
     const map: Record<number, Record<string, Turno[]>> = {};
