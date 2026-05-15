@@ -24,8 +24,8 @@ run(["chmod", "+x", "/tmp/pnpm"])
 req_path = os.path.join(REPO_ROOT, "requirements.txt")
 run([sys.executable, "-m", "pip", "install", "-r", req_path])
 
-# 3. Install JS dependencies with pnpm (ignore scripts for safety)
-run(["/tmp/pnpm", "install", "--ignore-scripts"], cwd=REPO_ROOT)
+# 3. Install JS dependencies with pnpm (ignore scripts, no frozen lockfile due to pnpm version mismatch)
+run(["/tmp/pnpm", "install", "--ignore-scripts", "--no-frozen-lockfile"], cwd=REPO_ROOT)
 
 # 4. Build frontend
 frontend_dir = os.path.join(REPO_ROOT, "artifacts", "gestione-turni-react")
