@@ -3,7 +3,7 @@ services:
     name: smartshift-pro
     runtime: python
     plan: free
-    buildCommand: curl -fsSL https://github.com/pnpm/pnpm/releases/download/v9.15.0/pnpm-linux-x64 -o /tmp/pnpm && chmod +x /tmp/pnpm && pip install -r flask-app/requirements.txt && /tmp/pnpm install --ignore-scripts && cd artifacts/gestione-turni-react && PORT=5173 BASE_PATH=/ /tmp/pnpm exec vite build --config vite.config.ts
+    buildCommand: pip install -r flask-app/requirements.txt && corepack enable && corepack pnpm install --ignore-scripts && cd artifacts/gestione-turni-react && PORT=5173 BASE_PATH=/ corepack pnpm exec vite build --config vite.config.ts
     startCommand: gunicorn --chdir flask-app wsgi:app
     envVars:
       - key: SESSION_SECRET
@@ -12,7 +12,3 @@ services:
         sync: false
       - key: PYTHON_VERSION
         value: 3.11.9
-      - key: COREPACK_ENABLE
-        value: "0"
-      - key: NODE_VERSION
-        value: 20.11.0
